@@ -1,12 +1,4 @@
-import React from "react";
 
-// Generic, table-less editor for Atoms, Bonds, Angles
-// Usage example is at the bottom.
-
-// ---------- Types ----------
-export type Atom = { id: number; x: number; y: number };
-export type Bond = { id: number; i: number; j: number; k: number };
-export type Angle = { id: number; i: number; j: number; k: number; ktheta: number };
 
 export type TableProps<T extends { id: number }> = {
   title: string;
@@ -14,7 +6,7 @@ export type TableProps<T extends { id: number }> = {
   fields: FieldSpec<T>[];
   onChange: (rows: T[]) => void;
   onRemove: (id: number) => void;
-  maxHeight?: number | string; // e.g. 260 or '260px'
+  maxHeight?: number | string; 
 };
 
 export type FieldSpec<T> = {
@@ -26,7 +18,7 @@ export type FieldSpec<T> = {
   readOnly?: boolean;        // show as text instead of input
 };
 
-export function EditableList<T extends { id: number }>({ title, rows, fields, onChange, onRemove, maxHeight = 260 }: TableProps<T>) {
+export function EditableList<T extends { id: number }>({ title, rows, fields, onChange, onRemove, maxHeight = 500 }: TableProps<T>) {
   const colCount = fields.length + 1; // +1 for remove button
 
   function updateCell(idx: number, key: keyof T, raw: string) {
