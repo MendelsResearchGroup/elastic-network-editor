@@ -1,0 +1,206 @@
+import { useCallback, useEffect, useMemo, useState } from "react";
+import type { Atom, Bond } from "./model";
+
+type Graph = { atoms: Atom[]; bonds: Bond[] };
+const STORAGE_KEY = "graph-state-v1";
+
+// Deep clone (structuredClone if present)
+function deepClone<T>(x: T): T {
+  // @ts-ignore
+  if (typeof structuredClone === "function") return structuredClone(x);
+  return JSON.parse(JSON.stringify(x));
+}
+function nextAtomId(list: Atom[]) {
+  let m = 0; for (const a of list) if (typeof a.id === "number" && a.id > m) m = a.id; return m + 1;
+}
+function nextBondId(list: Bond[]) {
+  let m = 0; for (const b of list) if (typeof b.id === "number" && (b as any).id > m) m = (b as any).id; return m + 1;
+}
+function loadFromStorage(): { atoms?: Atom[]; bonds?: Bond[]; selected?: number | null; zoomPercent?: number } | null {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (!raw) return null;
+    return JSON.parse(raw);
+  } catch { return null; }
+}
+
+export function useGraph(initial?: Graph) {
+  // ---- initial graph (from storage > param > defaults)
+  const initialGraph: Graph = (() => {
+    const saved = loadFromStorage();
+    if (saved?.atoms && saved?.bonds) return { atoms: saved.atoms, bonds: saved.bonds };
+    if (initial) return deepClone(initial);
+    return {
+      atoms: [
+        { id: 1, x: -1, y: -1 },
+        { id: 2, x: -1, y:  1 },
+        { id: 3, x:  1, y:  1 },
+        { id: 4, x:  1, y: -1 },
+        { id: 5, x:  0, y:  0 },
+      ],
+      bonds: [
+        { id: 1, i: 1, j: 2, k: 0.5 },
+        { id: 2, i: 2, j: 3, k: 0.5 },
+        { id: 3, i: 3, j: 4, k: 0.5 },
+        { id: 4, i: 1, j: 4, k: 0.5 },
+        { id: 5, i: 1, j: 5, k: 1 },
+        { id: 6, i: 2, j: 5, k: 1 },
+        { id: 7, i: 3, j: 5, k: 1 },
+        { id: 8, i: 4, j: 5, k: 1 },
+      ],
+    };
+  })();
+
+  // ---- undoable graph
+  const [present, setPresent] = useState<Graph>(initialGraph);
+  const [past, setPast] = useState<Graph[]>([]);
+  const [future, setFuture] = useState<Graph[]>([]);
+
+  // ---- UI bits (persisted, non-undoable)
+  const saved = loadFromStorage();
+  const [selected, setSelected] = useState<number | null>(saved?.selected ?? null);
+  const [zoomPercent, setZoomPercent] = useState<number>(saved?.zoomPercent ?? 100);
+
+  // ---- commit helper
+  const commit = useCallback((updater: (g: Graph) => Graph) => {
+    setPresent(prev => {
+      const next = deepClone(updater(prev));
+      if (next.atoms === prev.atoms && next.bonds === prev.bonds) return prev;
+      setPast(p => [...p, deepClone(prev)]);
+      setFuture([]);
+      return next;
+    });
+  }, []);
+
+  // ---- safe setters
+  const setAtoms = useCallback((atoms: Atom[] | ((a: Atom[]) => Atom[])) => {
+    commit(g => {
+      const nextArr = typeof atoms === "function" ? (atoms as any)(g.atoms) : atoms;
+      return { atoms: deepClone(Array.isArray(nextArr) ? nextArr : g.atoms), bonds: g.bonds };
+    });
+  }, [commit]);
+
+  const setBonds = useCallback((bonds: Bond[] | ((b: Bond[]) => Bond[])) => {
+    commit(g => {
+      const nextArr = typeof bonds === "function" ? (bonds as any)(g.bonds) : bonds;
+      return { atoms: g.atoms, bonds: deepClone(Array.isArray(nextArr) ? nextArr : g.bonds) };
+    });
+  }, [commit]);
+
+  // ---- actions
+  const addAtom = () => commit(g => ({ atoms: [...g.atoms, { id: nextAtomId(g.atoms), x: 0, y: 0 }], bonds: g.bonds }));
+  const removeAtom = (id: number) => commit(g => ({
+    atoms: g.atoms.filter(a => a.id !== id),
+    bonds: g.bonds.filter(b => b.i !== id && b.j !== id),
+  }));
+  const addBond = () => commit(g => {
+    if (g.atoms.length < 2) return g;
+    const [i, j] = [g.atoms[0].id, g.atoms[1].id];
+    return { atoms: g.atoms, bonds: [...g.bonds, { id: nextBondId(g.bonds), i, j, k: 1 }] };
+  });
+  const removeBond = (id: number) => commit(g => ({ atoms: g.atoms, bonds: g.bonds.filter(b => b.id !== id) }));
+  const clearAtoms = () => commit(() => ({ atoms: [], bonds: [] }));
+  const clearBonds = () => commit(g => ({ atoms: g.atoms, bonds: [] }));
+
+  const removeByIds = useCallback((ids: number[]) => {
+    if (!ids?.length) return;
+    const target = new Set(ids);
+    commit(g => ({
+      atoms: g.atoms.filter(a => !target.has(a.id)),
+      bonds: g.bonds.filter(b => !target.has(b.i) && !target.has(b.j)),
+    }));
+  }, [commit]);
+
+
+  const undo = useCallback(() => {
+    setPast(p => {
+      if (!p.length) return p;
+      const prev = p[p.length - 1];
+      setFuture(f => [deepClone(present), ...f]);
+      setPresent(deepClone(prev));
+      return p.slice(0, -1);
+    });
+  }, [present]);
+  const redo = useCallback(() => {
+    setFuture(f => {
+      if (!f.length) return f;
+      const next = f[0];
+      setPast(p => [...p, deepClone(present)]);
+      setPresent(deepClone(next));
+      return f.slice(1);
+    });
+  }, [present]);
+  const canUndo = past.length > 0;
+  const canRedo = future.length > 0;
+
+  function nextBondId(list: Bond[]) {
+    let m = 0;
+    for (const b of list) {
+      const bid = (b as any).id;
+      if (typeof bid === "number" && bid > m) m = bid;
+    }
+    return m + 1;
+  }
+
+const addBondBetween = useCallback((i: number, j: number, k = 1) => {
+  if (i === j) return; // ignore self-bond
+  commit(g => {
+    const already = g.bonds.some(b =>
+      (b.i === i && b.j === j) || (b.i === j && b.j === i)
+    );
+    if (already) return g;
+    return {
+      atoms: g.atoms,
+      bonds: [...g.bonds, { id: nextBondId(g.bonds), i, j, k }],
+    };
+  });
+}, [commit]);
+
+  // ---- keyboard: ONLY undo/redo here (selection-aware keys live in CanvasView)
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const mod = e.ctrlKey || e.metaKey;
+      const k = e.key.toLowerCase();
+      if (mod && k === "z" && !e.shiftKey) { undo(); e.preventDefault(); }
+      else if (mod && (k === "y" || (k === "z" && e.shiftKey))) { redo(); e.preventDefault(); }
+    };
+    window.addEventListener("keydown", onKey, { capture: true });
+    return () => window.removeEventListener("keydown", onKey, { capture: true } as any);
+  }, [undo, redo]);
+
+  // ---- persist to localStorage
+  useEffect(() => {
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify({
+        atoms: present.atoms,
+        bonds: present.bonds,
+        selected,
+        zoomPercent,
+      }));
+    } catch {}
+  }, [present, selected, zoomPercent]);
+
+  // ---- derived
+  const atoms = present.atoms;
+  const bonds = present.bonds;
+  const scale = zoomPercent / 100;
+
+  return useMemo(() => ({
+    // state
+    atoms, bonds, setAtoms, setBonds,
+    selected, setSelected,
+    zoomPercent, setZoomPercent,
+    scale,
+
+    // actions
+    addAtom, removeAtom, addBond, removeBond, clearAtoms, clearBonds, removeByIds,
+
+    // history
+    undo, redo, canUndo, canRedo, addBondBetween
+  }), [
+    atoms, bonds, setAtoms, setBonds,
+    selected, zoomPercent, scale,
+    addAtom, removeAtom, addBond, removeBond, clearAtoms, clearBonds, removeByIds,
+    undo, redo, canUndo, canRedo, addBondBetween
+  ]);
+}
