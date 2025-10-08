@@ -43,7 +43,7 @@ export default function CanvasView({
 
   const [gridSnap, setGridSnap] = useState(true);
   const [gridShow, setGridShow] = useState(true);
-  const [gridSize, setGridSize] = useState(0.1);
+  const [gridSize, setGridSize] = useState(0.5);
   const snap = (v: number) => gridSnap ? Math.round(v / gridSize) * gridSize : v;
 
   const selectionRef = useRef<Set<number>>(new Set(selected != null ? [selected] : []));
@@ -389,7 +389,7 @@ export default function CanvasView({
 
       <canvas
         ref={canvasRef}
-        className="w-full h-[420px] bg-slate-50"
+        className="w-full h-full bg-slate-50"
         style={{ touchAction: "none", cursor: dragRef.current?.pressed ? "grabbing" : "default" }}
         onPointerDown={onPointerDown}
         onPointerMove={onPointerMove}
