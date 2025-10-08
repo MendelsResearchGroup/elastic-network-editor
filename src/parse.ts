@@ -84,7 +84,7 @@ export const generateLmp = (
 
   lines.push("Masses");
   lines.push("");
-  lines.push(`1 1000000.0`);
+  lines.push(`1 1.0`);
   lines.push("");
 
   lines.push("Atoms # ['atomID', 'moleculeID', 'atomType', 'charge', 'x', 'y', 'z']");
@@ -121,20 +121,21 @@ export const generateLmp = (
 
   lines.push("Bond Coeffs # ['bondID', 'bondCoeff', 'd']");
   lines.push("");
-  if (bonds.length) {
-    const seen = new Set<number>();
-    bonds.forEach(b => {
-      if (seen.has(b.k)) return;
-      seen.add(b.k);
-      const t = bondTypeIds.get(b.k)!;
-      const ai = atoms.find(x => x.id === b.i)!;
-      const aj = atoms.find(x => x.id === b.j)!;
-      const r0 = distance(ai, aj);
-      lines.push(`${t} ${b.k} ${r0.toFixed(6)}`);
-    });
-  } else {
-    lines.push(`1 100.0 1.000000`);
+  if (!bonds.length) { 
+    throw new Error('Must have bonds')
   }
+  
+  const seen = new Set<number>();
+  bonds.forEach(b => {
+    if (seen.has(b.k)) return;
+    seen.add(b.k);
+    const t = bondTypeIds.get(b.k)!;
+    const ai = atoms.find(x => x.id === b.i)!;
+    const aj = atoms.find(x => x.id === b.j)!;
+    const r0 = distance(ai, aj);
+    lines.push(`${t} ${b.k} ${r0.toFixed(6)}`);
+  });
+
   lines.push("");
 
   lines.push("Angle Coeffs");
@@ -146,7 +147,7 @@ export const generateLmp = (
       const akA = atoms.find(x => x.id === a.k)!;
       const th0 = angleTheta(aiA, ajA, akA) * 180 / Math.PI;
       const t = ai + 1;
-      lines.push(`${t} 0.000000 ${th0.toFixed(6)}`);
+      lines.push(`${t} 0.01 ${th0.toFixed(6)}`);
     });
   } else {
     lines.push(`1 0.0 120.000000`);

@@ -41,6 +41,11 @@ export default function CanvasView({
   const WORLD = 50;
   const MOVE_EPS = 3 / (scale * WORLD);
 
+  const [gridSnap, setGridSnap] = useState(true);
+  const [gridShow, setGridShow] = useState(true);
+  const [gridSize, setGridSize] = useState(0.1);
+  const snap = (v: number) => gridSnap ? Math.round(v / gridSize) * gridSize : v;
+
   const selectionRef = useRef<Set<number>>(new Set(selected != null ? [selected] : []));
   const [tick, setTick] = useState(0);
   function setSelection(next: Set<number>) {
@@ -58,7 +63,6 @@ export default function CanvasView({
   const editorInputRef = useRef<HTMLInputElement>(null);
   const [editor, setEditor] = useState<null | { bondId: number; value: string; left: number; top: number }>(null);
 
-  // ---------- helpers ----------
   const validateStr = (s: string) => {
     if (s === "" || s === "-" || s === "." || s === "-.") return false;
     const n = Number(s); return Number.isFinite(n);
@@ -94,7 +98,6 @@ export default function CanvasView({
     return null;
   }
 
-  // ---------- draw ----------
   useEffect(() => {
     const c = canvasRef.current; if (!c) return;
     const ctx = c.getContext("2d"); if (!ctx) return;
@@ -110,47 +113,83 @@ export default function CanvasView({
 
     const px = (n: number) => n / (scale * WORLD);
 
-    // bonds with k label pill
-    ctx.lineWidth = px(2);
+    if (gridShow) {
+      const halfW = c.width / (2 * dpr * scale * WORLD);
+      const halfH = c.height / (2 * dpr * scale * WORLD);
+      const gs = gridSize;
+      const majorEvery = 10;
+
+      ctx.save();
+      ctx.lineWidth = px(1);
+      ctx.globalAlpha = 0.85;
+
+      const xStart = Math.ceil((-halfW) / gs) * gs;
+      const xEnd = Math.floor((halfW) / gs) * gs;
+      for (let x = xStart; x <= xEnd; x = +(x + gs).toFixed(12)) {
+        const major = Math.round(x / gs) % majorEvery === 0;
+        ctx.beginPath();
+        ctx.moveTo(x, -halfH);
+        ctx.lineTo(x, halfH);
+        ctx.strokeStyle = major ? "#94a3b8" : "#e2e8f0";
+        ctx.globalAlpha = major ? 0.9 : 0.7;
+        ctx.stroke();
+      }
+
+      const yStart = Math.ceil((-halfH) / gs) * gs;
+      const yEnd = Math.floor((halfH) / gs) * gs;
+      for (let y = yStart; y <= yEnd; y = +(y + gs).toFixed(12)) {
+        const major = Math.round(y / gs) % majorEvery === 0;
+        ctx.beginPath();
+        ctx.moveTo(-halfW, y);
+        ctx.lineTo(halfW, y);
+        ctx.strokeStyle = major ? "#94a3b8" : "#e2e8f0";
+        ctx.globalAlpha = major ? 0.9 : 0.7;
+        ctx.stroke();
+      }
+      ctx.restore();
+    }
+
+    const px2 = (n: number) => n / (scale * WORLD);
+
+    ctx.lineWidth = px2(2);
     ctx.globalAlpha = 0.95;
     bonds.forEach(b => {
       const ai = byId.get(b.i), aj = byId.get(b.j); if (!ai || !aj) return;
       const bothSel = selectionRef.current.has(b.i) && selectionRef.current.has(b.j);
       ctx.beginPath(); ctx.moveTo(ai.x, ai.y); ctx.lineTo(aj.x, aj.y);
       ctx.strokeStyle = bothSel ? "#1e40af" : "#334155";
-      ctx.lineWidth = bothSel ? px(3) : px(2);
+      ctx.lineWidth = bothSel ? px2(3) : px2(2);
       ctx.stroke();
 
       const mx = (ai.x + aj.x) / 2, my = (ai.y + aj.y) / 2;
       const label = `k=${b.k}`;
-      ctx.font = `${px(12)}px ui-sans-serif`;
+      ctx.font = `${px2(12)}px ui-sans-serif`;
       const metrics = ctx.measureText(label);
-      const padX = px(4), h = px(16);
+      const padX = px2(4), h = px2(16);
       ctx.save(); ctx.translate(mx, my);
       ctx.globalAlpha = 0.92; ctx.fillStyle = "rgba(255,255,255,0.9)";
-      ctx.strokeStyle = "#cbd5e1"; ctx.lineWidth = px(1);
-      roundedRect(ctx, -(metrics.width/2 + padX), -h/2, metrics.width + padX*2, h, px(6));
+      ctx.strokeStyle = "#cbd5e1"; ctx.lineWidth = px2(1);
+      roundedRect(ctx, -(metrics.width/2 + padX), -h/2, metrics.width + padX*2, h, px2(6));
       ctx.fill(); ctx.stroke();
       ctx.globalAlpha = 1; ctx.fillStyle = "#0f172a";
-      ctx.fillText(label, -metrics.width/2, px(4.5));
+      ctx.fillText(label, -metrics.width/2, px2(4.5));
       ctx.restore();
     });
 
-    // atoms
     ctx.globalAlpha = 1;
     atoms.forEach(a => {
       const sel = selectionRef.current.has(a.id);
-      const r = px(8);
+      const r = px2(8);
       if (sel) {
         ctx.beginPath(); ctx.arc(a.x, a.y, r * 1.65, 0, Math.PI * 2);
         ctx.fillStyle = "rgba(59,130,246,0.20)"; ctx.fill();
       }
       ctx.beginPath(); ctx.arc(a.x, a.y, r, 0, Math.PI * 2);
       ctx.fillStyle = sel ? "#2563eb" : "#0ea5e9"; ctx.fill();
-      ctx.lineWidth = sel ? px(3) : px(2); ctx.strokeStyle = sel ? "#1e3a8a" : "#0c4a6e"; ctx.stroke();
-      ctx.fillStyle = "#111827"; ctx.font = `${px(12)}px ui-sans-serif`; ctx.fillText(`${a.id}`, a.x + px(10), a.y - px(10));
+      ctx.lineWidth = sel ? px2(3) : px2(2); ctx.strokeStyle = sel ? "#1e3a8a" : "#0c4a6e"; ctx.stroke();
+      ctx.fillStyle = "#111827"; ctx.font = `${px2(12)}px ui-sans-serif`; ctx.fillText(`${a.id}`, a.x + px2(10), a.y - px2(10));
     });
-  }, [atoms, bonds, scale, byId, tick]);
+  }, [atoms, bonds, scale, byId, tick, gridShow, gridSize]);
 
   function roundedRect(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, r: number) {
     const rr = Math.min(r, Math.abs(w)/2, Math.abs(h)/2);
@@ -168,9 +207,7 @@ export default function CanvasView({
 
   const onPointerDown = (e: React.PointerEvent<HTMLCanvasElement>) => {
     wrapperRef.current?.focus({ preventScroll: true });
-
     if (editor && e.target !== editorInputRef.current) commitEditorIfOpen(true);
-
     e.preventDefault();
     const p = getCanvasPoint(e);
     const id = hitTestAtom(p.x, p.y);
@@ -194,12 +231,17 @@ export default function CanvasView({
       const ddx = p.x - d.last.x, ddy = p.y - d.last.y;
       if (ddx || ddy) {
         const sel = selectionRef.current;
-        setAtoms(prev => prev.map(a => (sel.has(a.id) ? { ...a, x: a.x + ddx, y: a.y + ddy } : a)));
+        setAtoms(prev => prev.map(a => {
+          if (!sel.has(a.id)) return a;
+          const nx = a.x + ddx, ny = a.y + ddy;
+          return { ...a, x: snap(nx), y: snap(ny) };
+        }));
         d.last = p;
       }
     } else if (d.id != null) {
       const { dx = 0, dy = 0 } = d;
-      setAtoms(prev => prev.map(a => (a.id === d.id ? { ...a, x: p.x - dx, y: p.y - dy } : a)));
+      const nx = p.x - dx, ny = p.y - dy;
+      setAtoms(prev => prev.map(a => (a.id === d.id ? { ...a, x: snap(nx), y: snap(ny) } : a)));
       d.last = p;
     }
   };
@@ -267,7 +309,7 @@ export default function CanvasView({
 
     const idMap = new Map<number, number>();
     let nextId = atomStart;
-    const newAtoms: Atom[] = srcAtoms.map(a => { const nid = nextId++; idMap.set(a.id, nid); return { ...a, id: nid, x: a.x + dx, y: a.y + dy }; });
+    const newAtoms: Atom[] = srcAtoms.map(a => { const nid = nextId++; idMap.set(a.id, nid); return { ...a, id: nid, x: snap(a.x + dx), y: snap(a.y + dy) }; });
     let nextBond = bondStart;
     const newBonds: Bond[] = srcBonds.map(b => ({ ...b, id: nextBond++, i: idMap.get(b.i)!, j: idMap.get(b.j)! }));
 
@@ -280,9 +322,8 @@ export default function CanvasView({
     if (editor && document.activeElement === editorInputRef.current) return;
 
     const mod = e.ctrlKey || e.metaKey;
-    const key = e.key; // don't lowercase; match both code & key for robustness
+    const key = e.key;
 
-    // DELETE / BACKSPACE: remove all selected
     if (key === "Delete" || key === "Backspace" || e.code === "Delete" || e.code === "Backspace") {
       const ids = [...selectionRef.current];
       if (ids.length) {
@@ -295,14 +336,12 @@ export default function CanvasView({
       return;
     }
 
-    // COPY
     if (mod && (key === "c" || key === "C")) {
       const payload = copySelection();
       if (payload) { (window as any).__atomClipboard = payload; e.preventDefault(); e.stopPropagation(); }
       return;
     }
 
-    // PASTE
     if (mod && (key === "v" || key === "V")) {
       const payload = (window as any).__atomClipboard as { A: Atom[]; B: Bond[] } | undefined;
       if (!payload && selectionRef.current.size > 0) {
@@ -313,11 +352,9 @@ export default function CanvasView({
       return;
     }
 
-    // New bond between two selected atoms
     if (mod && (key === "b" || key === "B")) {
       const ids = [...selectionRef.current];
       if (ids.length === 2) {
-        // Optional: choose k from context. Here: default to 1.
         addBondBetween(ids[0], ids[1], 1);
         e.preventDefault();
         e.stopPropagation();
@@ -380,8 +417,34 @@ export default function CanvasView({
         />
       )}
 
-      <div className="px-3 py-2 text-xs border-t bg-white">
-        Click to select (Shift+click adds/removes). Drag any selected atom to move the group. Delete/Backspace removes all selected. Ctrl/⌘+C then Ctrl/⌘+V duplicates. Double-click a <code>k=</code> to edit (saves on blur).
+      <div className="px-3 py-2 text-xs border-t bg-white flex items-center gap-3 flex-wrap">
+        <div className="flex items-center gap-2">
+          <label className="inline-flex items-center gap-1">
+            <input type="checkbox" checked={gridShow} onChange={(e) => { setGridShow(e.target.checked); setTick(t=>t+1); }} />
+            <span>Grid</span>
+          </label>
+          <label className="inline-flex items-center gap-1">
+            <input type="checkbox" checked={gridSnap} onChange={(e) => setGridSnap(e.target.checked)} />
+            <span>Snap</span>
+          </label>
+        </div>
+        <div className="flex items-center gap-1">
+          <span>Spacing</span>
+          <select
+            value={String(gridSize)}
+            onChange={(e) => { setGridSize(parseFloat(e.target.value)); setTick(t=>t+1); }}
+            className="border rounded-md px-1 py-[2px]"
+          >
+            <option value="0.5">0.5</option>
+            <option value="0.25">0.25</option>
+            <option value="0.1">0.1</option>
+            <option value="0.05">0.05</option>
+            <option value="0.01">0.01</option>
+          </select>
+        </div>
+        <div className="ml-auto">
+          Click to select (Shift+click adds/removes). Drag any selected atom to move the group. Delete/Backspace removes. Ctrl/⌘+C / Ctrl/⌘+V duplicates. Double-click a <code>k=</code> to edit.
+        </div>
       </div>
     </div>
   );
