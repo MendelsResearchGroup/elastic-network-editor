@@ -104,7 +104,6 @@ export function EditableList<T extends { id: number }>({
             <div className={`${cellPad} text-right`} />
           </div>
 
-          {/* Rows */}
           {rows.length === 0 ? (
             <div className="col-span-full px-3 py-6 text-center text-slate-400">No rows yet</div>
           ) : (
@@ -156,12 +155,12 @@ export function EditableList<T extends { id: number }>({
                 })}
                 <div className={`${cellPad} text-right`}>
                   <button
-                    className="inline-flex items-center gap-1 rounded-md border px-2 py-1 text-xs text-red-600 hover:bg-red-50"
+                    className="inline-flex items-center rounded-md border px-2 py-1 text-xs text-red-600 hover:bg-red-50"
                     onClick={() => onRemove(row.id)}
                     aria-label={`Remove row ${row.id}`}
                     title="Remove"
                   >
-                    ✕ Remove
+                    ✕ 
                   </button>
                 </div>
               </div>

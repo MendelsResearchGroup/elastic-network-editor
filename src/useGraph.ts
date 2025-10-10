@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { Atom, Bond } from "./model";
+import { parseLmp } from "./parse";
 
 type Graph = { atoms: Atom[]; bonds: Bond[] };
 const STORAGE_KEY = "graph-state-v1";
@@ -25,7 +26,6 @@ function loadFromStorage(): { atoms?: Atom[]; bonds?: Bond[]; selected?: number 
 }
 
 export function useGraph(initial?: Graph) {
-  // ---- initial graph (from storage > param > defaults)
   const initialGraph: Graph = (() => {
     const saved = loadFromStorage();
     if (saved?.atoms && saved?.bonds) return { atoms: saved.atoms, bonds: saved.bonds };
@@ -51,17 +51,14 @@ export function useGraph(initial?: Graph) {
     };
   })();
 
-  // ---- undoable graph
   const [present, setPresent] = useState<Graph>(initialGraph);
   const [past, setPast] = useState<Graph[]>([]);
   const [future, setFuture] = useState<Graph[]>([]);
 
-  // ---- UI bits (persisted, non-undoable)
   const saved = loadFromStorage();
   const [selected, setSelected] = useState<number | null>(saved?.selected ?? null);
   const [zoomPercent, setZoomPercent] = useState<number>(saved?.zoomPercent ?? 100);
 
-  // ---- commit helper
   const commit = useCallback((updater: (g: Graph) => Graph) => {
     setPresent(prev => {
       const next = deepClone(updater(prev));
@@ -87,7 +84,6 @@ export function useGraph(initial?: Graph) {
     });
   }, [commit]);
 
-  // ---- actions
   const addAtom = () => commit(g => ({ atoms: [...g.atoms, { id: nextAtomId(g.atoms), x: 0, y: 0 }], bonds: g.bonds }));
   const removeAtom = (id: number) => commit(g => ({
     atoms: g.atoms.filter(a => a.id !== id),
@@ -98,6 +94,9 @@ export function useGraph(initial?: Graph) {
     const [i, j] = [g.atoms[0].id, g.atoms[1].id];
     return { atoms: g.atoms, bonds: [...g.bonds, { id: nextBondId(g.bonds), i, j, k: 1 }] };
   });
+
+  const loadFromString = (lmpString: string) => commit(() => parseLmp (lmpString));
+
   const removeBond = (id: number) => commit(g => ({ atoms: g.atoms, bonds: g.bonds.filter(b => b.id !== id) }));
   const clearAtoms = () => commit(() => ({ atoms: [], bonds: [] }));
   const clearBonds = () => commit(g => ({ atoms: g.atoms, bonds: [] }));
@@ -156,7 +155,6 @@ const addBondBetween = useCallback((i: number, j: number, k = 1) => {
   });
 }, [commit]);
 
-  // ---- keyboard: ONLY undo/redo here (selection-aware keys live in CanvasView)
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const mod = e.ctrlKey || e.metaKey;
@@ -168,7 +166,6 @@ const addBondBetween = useCallback((i: number, j: number, k = 1) => {
     return () => window.removeEventListener("keydown", onKey, { capture: true } as any);
   }, [undo, redo]);
 
-  // ---- persist to localStorage
   useEffect(() => {
     try {
       localStorage.setItem(STORAGE_KEY, JSON.stringify({
@@ -180,27 +177,22 @@ const addBondBetween = useCallback((i: number, j: number, k = 1) => {
     } catch {}
   }, [present, selected, zoomPercent]);
 
-  // ---- derived
   const atoms = present.atoms;
   const bonds = present.bonds;
   const scale = zoomPercent / 100;
 
   return useMemo(() => ({
-    // state
     atoms, bonds, setAtoms, setBonds,
     selected, setSelected,
     zoomPercent, setZoomPercent,
     scale,
 
-    // actions
     addAtom, removeAtom, addBond, removeBond, clearAtoms, clearBonds, removeByIds,
-
-    // history
-    undo, redo, canUndo, canRedo, addBondBetween
+    undo, redo, canUndo, canRedo, addBondBetween, loadFromString
   }), [
     atoms, bonds, setAtoms, setBonds,
     selected, zoomPercent, scale,
     addAtom, removeAtom, addBond, removeBond, clearAtoms, clearBonds, removeByIds,
-    undo, redo, canUndo, canRedo, addBondBetween
+    undo, redo, canUndo, canRedo, addBondBetween, loadFromString
   ]);
 }

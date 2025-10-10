@@ -1,9 +1,10 @@
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { EditableList, type FieldSpec } from "./EditableList";
-import type { Angle, Atom, Bond, BondTypes } from "./model";
+import type { Atom, Bond, BondTypes } from "./model";
 import { generateLmp } from "./parse";
 import CanvasView from "./CanvasView";
 import { useGraph } from "./useGraph";
+import SimPanel from "./SimPanel";
 
 function AtomTable({
   rows, onChange, onRemove,
@@ -46,7 +47,7 @@ export default function App() {
     atoms, bonds, setAtoms, setBonds,
     addAtom, addBond, removeAtom, removeBond,
     undo, redo, canUndo, canRedo,
-    setSelected, removeByIds, selected, addBondBetween
+    setSelected, removeByIds, selected, addBondBetween, loadFromString
   } = useGraph();
 
   const [zoomPercent, setZoomPercent] = useState(200);
@@ -63,6 +64,16 @@ export default function App() {
 
   const lmp = useMemo(() => generateLmp(atoms, bonds, bondTypes), [atoms, bonds, bondTypes]);
 
+  const fileRef = useRef<HTMLInputElement>(null);
+  const onPickFile = () => fileRef.current?.click();
+  const onLoadFile: React.ChangeEventHandler<HTMLInputElement> = async (e) => {
+    const f = e.target.files?.[0];
+    if (!f) return;
+    const text = await f.text();
+    loadFromString(text);
+    e.target.value = "";
+  };
+
   return (
     <div className="w-full h-full grid grid-rows-[auto_1fr] bg-white text-slate-900">
       <div className="flex items-center gap-2 p-3 border-b sticky top-0 bg-white z-10">
@@ -74,6 +85,14 @@ export default function App() {
         <div className="flex gap-2">
           <button className="px-2 py-1 rounded-lg bg-slate-900 text-white text-xs" onClick={addAtom}>Add atom</button>
           <button className="px-2 py-1 rounded-lg bg-slate-900 text-white text-xs" onClick={addBond}>Add bond</button>
+          <button className="px-2 py-1 rounded-lg border text-xs" onClick={onPickFile}>Load .lmp</button>
+          <input
+            ref={fileRef}
+            type="file"
+            accept=".lmp,.data,.txt"
+            className="hidden"
+            onChange={onLoadFile}
+          />
         </div>
         <div className="ml-auto flex items-center gap-2">
           <span className="text-sm">Zoom</span>
@@ -90,7 +109,7 @@ export default function App() {
         </div>
       </div>
 
-      <div className="grid grid-cols-1 xl:grid-cols-[1fr_420px] gap-4 p-4">
+      {/* <div className="grid grid-cols-1 xl:grid-cols-[1fr_420px] gap-4 p-4">
         <div className="rounded-2xl border p-2 relative overflow-hidden"
           style={{ height: "calc(100vh - 72px)" }}>
           <CanvasView
@@ -112,7 +131,8 @@ export default function App() {
           <AtomTable rows={atoms} onChange={setAtoms} onRemove={removeAtom} />
           <BondTable rows={bonds} onChange={setBonds} onRemove={removeBond} />
         </div>
-      </div>
+      </div> */}
+      <SimPanel />
     </div>
   );
 }

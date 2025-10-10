@@ -156,3 +156,56 @@ export const generateLmp = (
 
   return lines.join("\n");
 };
+
+// grab the text block under a header until the next header or EOF
+function section(src: string, name: string): string {
+  const re = new RegExp(
+    `(?:^|\\n)\\s*${name}\\b[^\\n]*\\n+([\\s\\S]*?)(?=\\n\\s*(?:Atoms|Bonds|Angles|Masses|Bond\\s+Coeffs|Angle\\s+Coeffs)\\b|$)`,
+    "i"
+  );
+  const m = src.match(re);
+  return m ? m[1].trim() : "";
+}
+
+export function parseLmp(lmp: string): { atoms: Atom[]; bonds: Bond[] } {
+  const atomsTxt = section(lmp, "Atoms");
+  const bondsTxt = section(lmp, "Bonds");
+  const bondCoeffsTxt = section(lmp, "Bond Coeffs");
+
+  const typeIdToK = (() => {
+    const map = new Map<number, number>();
+    if (!bondCoeffsTxt) return map;
+    for (const line of bondCoeffsTxt.split(/\r?\n/)) {
+      const t = line.trim();
+      if (!t || !/^\d/.test(t)) continue;
+      const [typeId, k] = t.split(/\s+/).map(Number);
+      if (Number.isFinite(typeId) && Number.isFinite(k)) map.set(typeId, k);
+    }
+    return map;
+  })();
+
+  const atoms: Atom[] = atomsTxt
+    .split(/\r?\n/)
+    .map(s => s.trim())
+    .filter(s => s && /^\d/.test(s))
+    .map(s => {
+      const p = s.split(/\s+/);
+      return { id: +p[0], x: +p[4], y: +p[5] };
+    });
+
+  const bonds: Bond[] = bondsTxt
+    .split(/\r?\n/)
+    .map(s => s.trim())
+    .filter(s => s && /^\d/.test(s))
+    .map(s => {
+      const p = s.split(/\s+/);
+      const id = +p[0];
+      const typeId = +p[1];
+      const i = +p[2];
+      const j = +p[3];
+      const k = typeIdToK.get(typeId) ?? 1;
+      return { id, i, j, k };
+    });
+
+  return { atoms, bonds };
+}
