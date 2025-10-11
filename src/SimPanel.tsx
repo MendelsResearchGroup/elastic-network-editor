@@ -7,9 +7,9 @@ import { BaseButton } from "./BaseButton";
 type BondsView = { count: number; p1: Float32Array; p2: Float32Array };
 type Frame = { pos: Float32Array; bondsPacked: Float32Array; bondCount: number };
 
-const BG = 0xffffff;        // canvas-like soft gray
-const ATOM = 0x2563eb;      // deep slate (close to canvas atoms)
-const BOND = 0x334155;      // slate bonds
+const BG = 0xffffff;
+const ATOM = 0x2563eb;
+const BOND = 0x334155;
 
 export default function SimPanel({ network, autoPlay = true }: { network: string; autoPlay?: boolean }) {
   const { ready, running, startMinimal, stop, readPositions, readBonds, runFrames, readBox } =
@@ -18,7 +18,7 @@ export default function SimPanel({ network, autoPlay = true }: { network: string
   const host = useRef<HTMLDivElement>(null);
   const three = useRef<{
     r: THREE.WebGLRenderer;
-    cam: THREE.OrthographicCamera;
+    cam: THREE.PerspectiveCamera;
     s: THREE.Scene;
     atoms: THREE.InstancedMesh;
     bonds: THREE.LineSegments;
@@ -37,38 +37,45 @@ export default function SimPanel({ network, autoPlay = true }: { network: string
   useEffect(() => {
     if (!host.current || three.current) return;
 
-    // Scene & background (closer to canvas)
+    // Scene & renderer
     const s = new THREE.Scene();
     s.background = new THREE.Color(BG);
 
-    const viewHalf = 4;
-    const cam = new THREE.OrthographicCamera(-viewHalf, viewHalf, viewHalf, -viewHalf, -100, 100);
-    cam.position.set(0, 0, 10);
-    cam.lookAt(0, 0, 0);
-
-    // Renderer
-    const r = new THREE.WebGLRenderer({ antialias: true, alpha: false });
+    const r = new THREE.WebGLRenderer({ antialias: true });
     r.setPixelRatio(window.devicePixelRatio || 1);
     r.setSize(550, 550);
     r.outputColorSpace = THREE.SRGBColorSpace;
+    r.toneMapping = THREE.ACESFilmicToneMapping;
+
+    // Subtle real 3D look: perspective cam, slight tilt
+    const cam = new THREE.PerspectiveCamera(45, 1, 0.1, 100);
+    cam.position.set(0, 3.5, 8);
+    cam.lookAt(0, 0, 0);
+
     host.current.innerHTML = "";
     host.current.appendChild(r.domElement);
 
+    // Atoms: shaded spheres
     const atoms = new THREE.InstancedMesh(
-      new THREE.SphereGeometry(0.12, 16, 16),
-      new THREE.MeshStandardMaterial({ color: ATOM, metalness: 0, roughness: 1 }),
+      new THREE.SphereGeometry(0.12, 24, 20),
+      new THREE.MeshStandardMaterial({ color: ATOM, metalness: 0.05, roughness: 0.6 }),
       20000
     );
 
+    // Bonds: keep as lines (fast), now lit scene makes them pop
     const bonds = new THREE.LineSegments(
       new THREE.BufferGeometry(),
-      new THREE.LineBasicMaterial({ color: BOND })
+      new THREE.LineBasicMaterial({ color: BOND, linewidth: 1 })
     );
 
-    const amb = new THREE.AmbientLight(0xffffff, 1.0);
-    const dir = new THREE.DirectionalLight(0xffffff, 0.35);
-    dir.position.set(1, 1, 2);
-    s.add(amb, dir, atoms, bonds);
+    // Nicer lighting for roundness
+    const hemi = new THREE.HemisphereLight(0xffffff, 0x8090a0, 0.85);
+    const key = new THREE.DirectionalLight(0xffffff, 0.7);
+    key.position.set(2.5, 4, 3);
+    const fill = new THREE.DirectionalLight(0xffffff, 0.25);
+    fill.position.set(-3, 2, -2);
+
+    s.add(hemi, key, fill, atoms, bonds);
 
     three.current = { r, cam, s, atoms, bonds };
 
@@ -80,18 +87,10 @@ export default function SimPanel({ network, autoPlay = true }: { network: string
 
     const onResize = () => {
       if (!host.current || !three.current) return;
-      const sz = Math.min((host.current.getBoundingClientRect().width || 480), 640);
+      const sz = Math.min(host.current.getBoundingClientRect().width || 480, 640);
       three.current.r.setSize(sz, sz, false);
-
-      // Maintain orthographic framing at ±4 world units vertically.
-      const halfH = viewHalf;
-      const halfW = viewHalf; // aspect = 1 because we force square canvas
-      const c = three.current.cam;
-      c.left = -halfW;
-      c.right = halfW;
-      c.top = halfH;
-      c.bottom = -halfH;
-      c.updateProjectionMatrix();
+      three.current.cam.aspect = 1; // we keep square canvas
+      three.current.cam.updateProjectionMatrix();
     };
     window.addEventListener("resize", onResize);
     onResize();
@@ -120,7 +119,8 @@ export default function SimPanel({ network, autoPlay = true }: { network: string
     const n = pos.length / 3;
     for (let i = 0; i < n; i++) {
       const i3 = 3 * i;
-      m.setPosition(pos[i3], pos[i3 + 1], pos[i3 + 2]);
+      // still on z=0 plane; perspective + lights make them look 3D
+      m.makeTranslation(pos[i3], pos[i3 + 1], 0);
       atoms.setMatrixAt(i, m);
     }
     atoms.count = n;
@@ -149,10 +149,10 @@ export default function SimPanel({ network, autoPlay = true }: { network: string
       const i3 = 3 * i, i6 = 6 * i;
       arr[i6 + 0] = b.p1[i3 + 0];
       arr[i6 + 1] = b.p1[i3 + 1];
-      arr[i6 + 2] = b.p1[i3 + 2];
+      arr[i6 + 2] = 0; // keep bonds on z=0 plane
       arr[i6 + 3] = b.p2[i3 + 0];
       arr[i6 + 4] = b.p2[i3 + 1];
-      arr[i6 + 5] = b.p2[i3 + 2];
+      arr[i6 + 5] = 0;
     }
     return arr;
   };
