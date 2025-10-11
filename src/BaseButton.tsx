@@ -1,10 +1,14 @@
 export function BaseButton({
   children,
   variant = "default",
+  disabled,
   ...rest
-}: React.ButtonHTMLAttributes<HTMLButtonElement> & { variant?: "default" | "primary" | "ghost" | "danger" | "success" }) {
+}: React.ButtonHTMLAttributes<HTMLButtonElement> & {
+  variant?: "default" | "primary" | "ghost" | "danger" | "success";
+}) {
   const base =
     "px-3 py-1.5 rounded-lg text-sm font-medium transition-colors duration-150 cursor-pointer select-none focus:outline-none";
+
   const variants: Record<string, string> = {
     default:
       "bg-white border border-slate-300 hover:bg-slate-100 active:bg-slate-200 text-slate-700",
@@ -17,8 +21,16 @@ export function BaseButton({
     danger:
       "bg-rose-600 text-white hover:bg-rose-700 active:bg-rose-800 border border-rose-700",
   };
+
+  const disabledClasses =
+    "opacity-60 cursor-not-allowed pointer-events-none hover:none active:none";
+
   return (
-    <button className={`${base} ${variants[variant]}`} {...rest}>
+    <button
+      className={`${base} ${variants[variant]} ${disabled ? disabledClasses : ""}`}
+      disabled={disabled}
+      {...rest}
+    >
       {children}
     </button>
   );
