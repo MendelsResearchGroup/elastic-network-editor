@@ -60,7 +60,7 @@ export function useLammps(onPrint: (s: string) => void, network: string) {
     const {M, lmp} = await initLammps();
 
     const [inTxt, dataTxt] = await Promise.all([
-      fetch("/thermal-expand.deformation").then(r => r.text()),
+      fetch(`${ import.meta.env.BASE_URL}/thermal-expand.deformation`).then(r => r.text()),
       network,
     ]);
 
@@ -70,7 +70,6 @@ export function useLammps(onPrint: (s: string) => void, network: string) {
     M.FS.writeFile(`${base}/minimal_network.lmp`, dataTxt);
 
     setRunning(true);
-    // lmp.start();
     lmp.setSyncFrequency(1);
     lmp.start();
     
