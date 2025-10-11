@@ -1,6 +1,6 @@
 import { useMemo, useRef, useState } from "react";
 import { EditableList, type FieldSpec } from "./EditableList";
-import type { Atom, Bond, BondTypes } from "./model";
+import type { Atom, Bond } from "./model";
 import { generateLmp } from "./parse";
 import CanvasView from "./CanvasView";
 import { useGraph } from "./useGraph";
@@ -98,18 +98,10 @@ export default function App() {
   const [showSim, setShowSim] = useState(false);
   const scale = zoomPercent / 100;
 
-  const bondTypes: BondTypes = useMemo(() => {
-    const uniq = [...new Map(bonds.map((b) => [b.k, b])).values()]
-      .map((b) => b.k)
-      .sort((a, b) => a - b);
-    const map = new Map<number, number>();
-    uniq.forEach((k, idx) => map.set(k, idx + 1));
-    return { uniq, map };
-  }, [bonds]);
 
   const lmp = useMemo(
-    () => generateLmp(atoms, bonds, bondTypes),
-    [atoms, bonds, bondTypes]
+    () => generateLmp(atoms, bonds),
+    [atoms, bonds]
   );
 
   const fileRef = useRef<HTMLInputElement>(null);

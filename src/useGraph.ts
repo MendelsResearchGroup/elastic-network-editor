@@ -14,9 +14,7 @@ function deepClone<T>(x: T): T {
 function nextAtomId(list: Atom[]) {
   let m = 0; for (const a of list) if (typeof a.id === "number" && a.id > m) m = a.id; return m + 1;
 }
-function nextBondId(list: Bond[]) {
-  let m = 0; for (const b of list) if (typeof b.id === "number" && (b as any).id > m) m = (b as any).id; return m + 1;
-}
+
 function loadFromStorage(): { atoms?: Atom[]; bonds?: Bond[]; selected?: number | null; zoomPercent?: number } | null {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);

@@ -19,8 +19,8 @@
       bonds: THREE.LineSegments;
     } | null>(null);
 
-    const rafRender = useRef<number>();
-    const rafTick = useRef<number>();
+    const rafRender = useRef<number>(0);
+    const rafTick = useRef<number>(0);
     const scrubbing = useRef(false);
     const followLive = useRef(true);
 

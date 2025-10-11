@@ -1,4 +1,4 @@
-import type { Atom, Bond, BondTypes } from "./model";
+import type { Atom, Bond } from "./model";
 import { angleTheta } from "./utils";
 
 function distance(a: Atom, b: Atom) {
@@ -7,8 +7,7 @@ function distance(a: Atom, b: Atom) {
 
 export const generateLmp = (
   atoms: Atom[],
-  bonds: Bond[],
-  bondTypes: BondTypes
+  bonds: Bond[]
 ) => {
   // infer angles
   const neighbors = new Map<number, number[]>();

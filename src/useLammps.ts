@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import type { LammpsWeb } from "./types/lammps-web";
 import createModule from "./wasm/lammps.js";
 
