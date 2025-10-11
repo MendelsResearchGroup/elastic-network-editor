@@ -5,28 +5,59 @@ import { generateLmp } from "./parse";
 import CanvasView from "./CanvasView";
 import { useGraph } from "./useGraph";
 import SimPanel from "./SimPanel";
+import { BaseButton } from "./BaseButton";
+
+
 
 function AtomTable({
-  rows, onChange, onRemove,
-}: { rows: Atom[]; onChange: (r: Atom[]) => void; onRemove: (id: number) => void }) {
+  rows,
+  onChange,
+  onRemove,
+}: {
+  rows: Atom[];
+  onChange: (r: Atom[]) => void;
+  onRemove: (id: number) => void;
+}) {
   const fields: FieldSpec<Atom>[] = [
     { key: "id", label: "id", readOnly: true, widthClass: "w-16" },
     { key: "x", label: "x", kind: "number", widthClass: "w-24" },
     { key: "y", label: "y", kind: "number", widthClass: "w-24" },
   ];
-  return <EditableList title="Atoms" rows={rows} fields={fields} onChange={onChange} onRemove={onRemove} />;
+  return (
+    <EditableList
+      title="Atoms"
+      rows={rows}
+      fields={fields}
+      onChange={onChange}
+      onRemove={onRemove}
+    />
+  );
 }
 
 function BondTable({
-  rows, onChange, onRemove,
-}: { rows: Bond[]; onChange: (r: Bond[]) => void; onRemove: (id: number) => void }) {
+  rows,
+  onChange,
+  onRemove,
+}: {
+  rows: Bond[];
+  onChange: (r: Bond[]) => void;
+  onRemove: (id: number) => void;
+}) {
   const fields: FieldSpec<Bond>[] = [
     { key: "id", label: "id", readOnly: true, widthClass: "w-16" },
     { key: "i", label: "i", kind: "number", widthClass: "w-20" },
     { key: "j", label: "j", kind: "number", widthClass: "w-20" },
     { key: "k", label: "k", kind: "number", widthClass: "w-24" },
   ];
-  return <EditableList title="Bonds" rows={rows} fields={fields} onChange={onChange} onRemove={onRemove} />;
+  return (
+    <EditableList
+      title="Bonds"
+      rows={rows}
+      fields={fields}
+      onChange={onChange}
+      onRemove={onRemove}
+    />
+  );
 }
 
 function LammpsPreview({ text }: { text: string }) {
@@ -44,25 +75,42 @@ function LammpsPreview({ text }: { text: string }) {
 
 export default function App() {
   const {
-    atoms, bonds, setAtoms, setBonds,
-    addAtom, addBond, removeAtom, removeBond,
-    undo, redo, canUndo, canRedo,
-    setSelected, removeByIds, selected, addBondBetween, loadFromString
+    atoms,
+    bonds,
+    setAtoms,
+    setBonds,
+    addAtom,
+    addBond,
+    removeAtom,
+    removeBond,
+    undo,
+    redo,
+    canUndo,
+    canRedo,
+    setSelected,
+    removeByIds,
+    selected,
+    addBondBetween,
+    loadFromString,
   } = useGraph();
 
   const [zoomPercent, setZoomPercent] = useState(200);
+  const [showSim, setShowSim] = useState(false);
   const scale = zoomPercent / 100;
 
   const bondTypes: BondTypes = useMemo(() => {
-    const uniq = [...new Map(bonds.map(b => [b.k, b])).values()]
-      .map(b => b.k)
+    const uniq = [...new Map(bonds.map((b) => [b.k, b])).values()]
+      .map((b) => b.k)
       .sort((a, b) => a - b);
     const map = new Map<number, number>();
     uniq.forEach((k, idx) => map.set(k, idx + 1));
     return { uniq, map };
   }, [bonds]);
 
-  const lmp = useMemo(() => generateLmp(atoms, bonds, bondTypes), [atoms, bonds, bondTypes]);
+  const lmp = useMemo(
+    () => generateLmp(atoms, bonds, bondTypes),
+    [atoms, bonds, bondTypes]
+  );
 
   const fileRef = useRef<HTMLInputElement>(null);
   const onPickFile = () => fileRef.current?.click();
@@ -78,14 +126,26 @@ export default function App() {
     <div className="w-full h-full grid grid-rows-[auto_1fr] bg-white text-slate-900">
       <div className="flex items-center gap-2 p-3 border-b sticky top-0 bg-white z-10">
         <div className="flex gap-2">
-          <button className="px-2.5 py-1 rounded-lg border text-sm" disabled={!canUndo} onClick={undo}>Undo</button>
-          <button className="px-2.5 py-1 rounded-lg border text-sm" disabled={!canRedo} onClick={redo}>Redo</button>
+          <BaseButton variant="ghost" disabled={!canUndo} onClick={undo}>
+            Undo
+          </BaseButton>
+          <BaseButton variant="ghost" disabled={!canRedo} onClick={redo}>
+            Redo
+          </BaseButton>
         </div>
+
         <div className="h-5 w-px bg-slate-200 mx-2" />
+
         <div className="flex gap-2">
-          <button className="px-2 py-1 rounded-lg bg-slate-900 text-white text-xs" onClick={addAtom}>Add atom</button>
-          <button className="px-2 py-1 rounded-lg bg-slate-900 text-white text-xs" onClick={addBond}>Add bond</button>
-          <button className="px-2 py-1 rounded-lg border text-xs" onClick={onPickFile}>Load .lmp</button>
+          <BaseButton variant="primary" onClick={addAtom}>
+            Add Atom
+          </BaseButton>
+          <BaseButton variant="primary" onClick={addBond}>
+            Add Bond
+          </BaseButton>
+          <BaseButton variant="ghost" onClick={onPickFile}>
+            Load .lmp
+          </BaseButton>
           <input
             ref={fileRef}
             type="file"
@@ -94,24 +154,43 @@ export default function App() {
             onChange={onLoadFile}
           />
         </div>
+
+        <div className="h-5 w-px bg-slate-200 mx-2" />
+        <BaseButton
+          variant="success"
+          onClick={() => setShowSim(true)}
+          disabled={!atoms.length}
+          title={
+            atoms.length
+              ? "Simulate current network"
+              : "Add atoms to enable simulation"
+          }
+        >
+          Simulate
+        </BaseButton>
+
         <div className="ml-auto flex items-center gap-2">
           <span className="text-sm">Zoom</span>
           <input
-            className="accent-slate-900"
+            className="accent-slate-900 cursor-pointer"
             type="range"
             min={50}
             max={250}
             step={1}
             value={zoomPercent}
-            onChange={e => setZoomPercent(parseInt(e.target.value))}
+            onChange={(e) => setZoomPercent(parseInt(e.target.value))}
           />
-          <span className="tabular-nums text-xs w-12 text-right">{zoomPercent}%</span>
+          <span className="tabular-nums text-xs w-12 text-right">
+            {zoomPercent}%
+          </span>
         </div>
       </div>
 
-      {/* <div className="grid grid-cols-1 xl:grid-cols-[1fr_420px] gap-4 p-4">
-        <div className="rounded-2xl border p-2 relative overflow-hidden"
-          style={{ height: "calc(100vh - 72px)" }}>
+      <div className="grid grid-cols-1 xl:grid-cols-[1fr_420px] gap-4 p-4">
+        <div
+          className="rounded-2xl border p-2 relative overflow-hidden"
+          style={{ height: "calc(100vh - 72px)" }}
+        >
           <CanvasView
             addBondBetween={addBondBetween}
             atoms={atoms}
@@ -123,16 +202,38 @@ export default function App() {
             setBonds={setBonds}
             removeByIds={removeByIds}
           />
+
+          {showSim && (
+            <div className="absolute inset-0 z-20 bg-white/95 backdrop-blur-sm border-l border-t shadow-lg">
+              <div className="flex items-center gap-2 p-2 border-b bg-white">
+                <div className="font-medium text-sm">Simulation</div>
+                <div className="text-xs text-slate-500 ml-2">
+                  (live view of current network)
+                </div>
+                <BaseButton
+                  variant="ghost"
+                  onClick={() => setShowSim(false)}
+                  className="ml-auto"
+                >
+                  X
+                </BaseButton>
+              </div>
+              <div className="p-2 h-[calc(100%-40px)] overflow-hidden">
+                <SimPanel network={lmp} />
+              </div>
+            </div>
+          )}
         </div>
 
-        <div className="flex flex-col gap-3 overflow-auto"
-          style={{ maxHeight: "calc(100vh - 72px)" }}>
+        <div
+          className="flex flex-col gap-3 overflow-auto"
+          style={{ maxHeight: "calc(100vh - 72px)" }}
+        >
           <LammpsPreview text={lmp} />
           <AtomTable rows={atoms} onChange={setAtoms} onRemove={removeAtom} />
           <BondTable rows={bonds} onChange={setBonds} onRemove={removeBond} />
         </div>
-      </div> */}
-      <SimPanel />
+      </div>
     </div>
   );
 }

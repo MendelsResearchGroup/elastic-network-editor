@@ -8,24 +8,26 @@ type LammpsModule = {
   LAMMPSWeb: new () => LammpsWeb;
 };
 
-export function useLammps(onPrint: (s: string) => void) {
+export function useLammps(onPrint: (s: string) => void, network: string) {
   const [ready, setReady] = useState(false);
   const [running, setRunning] = useState(false);
   const modRef = useRef<LammpsModule | null>(null);
   const lmpRef = useRef<LammpsWeb | null>(null);
 
-  useEffect(() => {
-    (async () => {
-      const Module = (await createModule({
-        print: onPrint,
-        printErr: onPrint,
-      })) as unknown as LammpsModule;
+  const initLammps = useCallback(async () => {
+    if (modRef.current && lmpRef.current) { return { M: modRef.current, lmp: lmpRef.current }; }
 
-      const lmp = new Module.LAMMPSWeb();
-      modRef.current = Module;
-      lmpRef.current = lmp;
-      setReady(true);
-    })();
+    const Module = (await createModule({
+      print: onPrint,
+      printErr: onPrint,
+    })) as unknown as LammpsModule;
+
+    const lmp = new Module.LAMMPSWeb();
+    modRef.current = Module;
+    lmpRef.current = lmp;
+    setReady(true);
+
+    return { M: Module, lmp };
   }, [onPrint]);
 
   const readPositions = useCallback(() => {
@@ -55,36 +57,31 @@ export function useLammps(onPrint: (s: string) => void) {
   }, []);
 
   const startMinimal = useCallback(async () => {
-    const M = modRef.current, lmp = lmpRef.current;
-    if (!M || !lmp) throw new Error("LAMMPS not ready");
+    const {M, lmp} = await initLammps();
 
     const [inTxt, dataTxt] = await Promise.all([
       fetch("/thermal-expand.deformation").then(r => r.text()),
-      fetch("/minimal_network.lmp").then(r => r.text()),
+      network,
     ]);
 
     const base = "/work";
-    try { M.FS.mkdir(base); } catch {}
-    M.FS.writeFile(`${base}/in.lmp`, inTxt);
+    try { M.FS.mkdir(base); } catch { }
+    M.FS.writeFile(`${base}/in.lmp`, "echo none\nlog none\nclear\n" + inTxt);
     M.FS.writeFile(`${base}/minimal_network.lmp`, dataTxt);
 
     setRunning(true);
-    
-    lmp.start();
-
-    //@ts-ignore
-    window.postStepCallback = () => console.log("asd")
-    
-    await lmp.runFile(`${base}/in.lmp`);
+    // lmp.start();
     lmp.setSyncFrequency(1);
-
-
+    lmp.start();
+    
+    lmp.runFile(`${base}/in.lmp`);
   }, []);
 
+  const runFrames = useCallback(async (n: number) =>{lmpRef.current?.runCommand(`run ${n}`);}, [])
   const stop = useCallback(() => {
-    lmpRef.current?.stop();
+    lmpRef.current!.stop();
     setRunning(false);
   }, []);
 
-  return { ready, running, startMinimal, stop, readPositions, readBonds };
+  return { ready, running, startMinimal, stop, readPositions, readBonds, runFrames };
 }

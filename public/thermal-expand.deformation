@@ -1,10 +1,8 @@
-# ---------- Initialize ----------
 variable alat equal 3.8848589
 variable xdim equal ${alat}*5
 variable Tstart equal 0.001
 variable Tend equal 0.01
 variable dt equal 0.002
-variable runtime equal 100000
 variable Srandomseed equal 1001
 
 clear
@@ -41,4 +39,4 @@ variable A equal lx*ly
 fix j all print 100 """{"step": $(step), "T": $(temp), "lx": $(lx), "ly": $(ly), "area": $(v_A)}""" title "" file output.json screen no
 
 dump 1 all custom 100 dump.lammpstrj id type xu yu zu
-run ${runtime}
+
