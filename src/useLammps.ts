@@ -55,12 +55,23 @@ export function useLammps(onPrint: (s: string) => void, network: string) {
       count: nb,
     };
   }, []);
+  const readBox = useCallback(() => {
+    const M = modRef.current, lmp = lmpRef.current;
+    if (!M || !lmp)
+      return { lx: 0, ly: 0, lz: 0 };
+
+    const ptr = lmp.getBoxSizePointer(); // C++ method returning double[3]
+    const heap = M.HEAPF32;              // use F64 because it's double[]
+    const vals = heap.subarray(ptr >> 3, (ptr >> 3) + 3);
+
+    return { lx: vals[0], ly: vals[1], lz: vals[2] };
+  }, []);
 
   const startMinimal = useCallback(async () => {
-    const {M, lmp} = await initLammps();
+    const { M, lmp } = await initLammps();
 
     const [inTxt, dataTxt] = await Promise.all([
-      fetch(`${ import.meta.env.BASE_URL}/thermal-expand.deformation`).then(r => r.text()),
+      fetch(`${import.meta.env.BASE_URL}/thermal-expand.deformation`).then(r => r.text()),
       network,
     ]);
 
@@ -72,15 +83,15 @@ export function useLammps(onPrint: (s: string) => void, network: string) {
     setRunning(true);
     lmp.setSyncFrequency(1);
     lmp.start();
-    
+
     lmp.runFile(`${base}/in.lmp`);
   }, []);
 
-  const runFrames = useCallback(async (n: number) =>{lmpRef.current?.runCommand(`run ${n}`);}, [])
+  const runFrames = useCallback(async (n: number) => { lmpRef.current?.runCommand(`run ${n}`); }, [])
   const stop = useCallback(() => {
     lmpRef.current!.stop();
     setRunning(false);
   }, []);
 
-  return { ready, running, startMinimal, stop, readPositions, readBonds, runFrames };
+  return { ready, running, startMinimal, stop, readPositions, readBonds, runFrames, readBox };
 }

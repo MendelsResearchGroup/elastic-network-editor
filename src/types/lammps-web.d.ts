@@ -30,6 +30,7 @@ export type LammpsWeb = {
   getBondsPosition1Pointer: () => number;
   getBondsPosition2Pointer: () => number;
   getBondsDistanceMapPointer: () => number;
+  getBoxSizePointer: () => number; // returns double[3]
   getExceptionMessage: (address: number) => string;
 
   step: () => void;

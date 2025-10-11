@@ -12,7 +12,7 @@ const ATOM = 0x2563eb;      // deep slate (close to canvas atoms)
 const BOND = 0x334155;      // slate bonds
 
 export default function SimPanel({ network, autoPlay = true }: { network: string; autoPlay?: boolean }) {
-  const { ready, running, startMinimal, stop, readPositions, readBonds, runFrames } =
+  const { ready, running, startMinimal, stop, readPositions, readBonds, runFrames, readBox } =
     useLammps(console.log, network);
 
   const host = useRef<HTMLDivElement>(null);
@@ -173,6 +173,7 @@ export default function SimPanel({ network, autoPlay = true }: { network: string
       runFrames(6);
 
       const posView = readPositions();
+      console.log(readBox());
       if (posView && posView.length) {
         const bondsView = readBonds();
         const posCopy = Float32Array.from(posView);
