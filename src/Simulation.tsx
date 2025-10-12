@@ -1,15 +1,12 @@
 import { useEffect, useRef, useState } from "react";
 import * as THREE from "three";
+
+// @ts-ignore
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls";
 import { useLammps } from "./useLammps";
 import { BaseButton } from "./BaseButton";
 
-type PositionsView = {
-  count: number;
-  positions: Float32Array;
-  ids: Int32Array | BigInt64Array;
-  types: Int32Array;
-};
+
 type BondsView = { count: number; p1: Float32Array; p2: Float32Array };
 type Frame = {
   pos: Float32Array;

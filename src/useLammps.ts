@@ -11,7 +11,7 @@ type LammpsModule = {
   FS: any;
   LAMMPSWeb: new () => LammpsWeb;
 };
-const base = "/work";
+// const base = "/work";
 
 export function useLammps(onPrint: (s: string) => void, network: string) {
   const [ready, setReady] = useState(false);
