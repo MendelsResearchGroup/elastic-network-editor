@@ -1,4 +1,3 @@
-// SimPanel.tsx
 import { useEffect, useRef, useState } from "react";
 import * as THREE from "three";
 import { useLammps } from "./useLammps";
@@ -11,9 +10,9 @@ const BG = 0xffffff;
 const ATOM = 0x2563eb;
 const BOND = 0x334155;
 
-export default function SimPanel({ network, autoPlay = true }: { network: string; autoPlay?: boolean }) {
-  const { ready, running, startMinimal, stop, readPositions, readBonds, runFrames, readBox } =
-    useLammps(console.log, network);
+export default function Simulation({ network, isOpen, autoPlay = true }: { network: string; isOpen: boolean; autoPlay?: boolean }) {
+  const { ready, running, start, stop, readPositions, readBonds, runFrames, readBox, setNetwork } =
+    useLammps(() => {}, network);
 
   const host = useRef<HTMLDivElement>(null);
   const three = useRef<{
@@ -32,12 +31,18 @@ export default function SimPanel({ network, autoPlay = true }: { network: string
   const frames = useRef<Frame[]>([]);
   const frameIdx = useRef(0);
   const [inputFrameIdx, setInputFrameIdx] = useState(frameIdx.current);
+
   useEffect(() => { frameIdx.current = inputFrameIdx; }, [inputFrameIdx]);
 
+  useEffect(() => {setNetwork()}, [network])
   useEffect(() => {
+    if (!isOpen) {
+      stop();
+      return;
+    }
+
     if (!host.current || three.current) return;
 
-    // Scene & renderer
     const s = new THREE.Scene();
     s.background = new THREE.Color(BG);
 
@@ -47,7 +52,6 @@ export default function SimPanel({ network, autoPlay = true }: { network: string
     r.outputColorSpace = THREE.SRGBColorSpace;
     r.toneMapping = THREE.ACESFilmicToneMapping;
 
-    // Subtle real 3D look: perspective cam, slight tilt
     const cam = new THREE.PerspectiveCamera(45, 1, 0.1, 100);
     cam.position.set(0, 3.5, 8);
     cam.lookAt(0, 0, 0);
@@ -55,21 +59,18 @@ export default function SimPanel({ network, autoPlay = true }: { network: string
     host.current.innerHTML = "";
     host.current.appendChild(r.domElement);
 
-    // Atoms: shaded spheres
     const atoms = new THREE.InstancedMesh(
       new THREE.SphereGeometry(0.12, 24, 20),
       new THREE.MeshStandardMaterial({ color: ATOM, metalness: 0.05, roughness: 0.6 }),
       20000
     );
 
-    // Bonds: keep as lines (fast), now lit scene makes them pop
     const bonds = new THREE.LineSegments(
       new THREE.BufferGeometry(),
       new THREE.LineBasicMaterial({ color: BOND, linewidth: 1 })
     );
 
-    // Nicer lighting for roundness
-    const hemi = new THREE.HemisphereLight(0xffffff, 0x8090a0, 0.85);
+    const hemi = new THREE.HemisphereLight(0xffffff, 0x8090a0, 0.7);
     const key = new THREE.DirectionalLight(0xffffff, 0.7);
     key.position.set(2.5, 4, 3);
     const fill = new THREE.DirectionalLight(0xffffff, 0.25);
@@ -95,7 +96,7 @@ export default function SimPanel({ network, autoPlay = true }: { network: string
     window.addEventListener("resize", onResize);
     onResize();
 
-    autoPlay && startMinimal();
+    autoPlay && start();
 
     return () => {
       if (rafRender.current) cancelAnimationFrame(rafRender.current);
@@ -110,7 +111,7 @@ export default function SimPanel({ network, autoPlay = true }: { network: string
         three.current = null;
       }
     };
-  }, []);
+  }, [isOpen]);
 
   const drawAtoms = (pos: Float32Array) => {
     if (!three.current) return;
@@ -157,9 +158,8 @@ export default function SimPanel({ network, autoPlay = true }: { network: string
     return arr;
   };
 
-  // ---------- live capture while running ----------
   useEffect(() => {
-    if (!three.current || !running) return;
+    if (!three.current || !running || !isOpen) return;
 
     frames.current = [];
     frameIdx.current = 0;
@@ -170,7 +170,7 @@ export default function SimPanel({ network, autoPlay = true }: { network: string
     const tick = () => {
       if (!active) return;
 
-      runFrames(6);
+      runFrames(5);
 
       const posView = readPositions();
       console.log(readBox());
@@ -196,7 +196,7 @@ export default function SimPanel({ network, autoPlay = true }: { network: string
       active = false;
       if (rafTick.current) cancelAnimationFrame(rafTick.current);
     };
-  }, [running, readPositions, readBonds, runFrames]);
+  }, [running, readPositions, readBonds, runFrames, isOpen]);
 
   // ---------- draw scrubbed frame ----------
   useEffect(() => {
@@ -208,14 +208,14 @@ export default function SimPanel({ network, autoPlay = true }: { network: string
 
   const onScrubStart = () => { scrubbing.current = true; followLive.current = false; };
   const onScrubEnd = () => { scrubbing.current = false; };
-
+  
   return (
     <div className="border rounded p-3 flex flex-col gap-2 bg-white">
       <div className="flex items-center gap-3">
         <BaseButton
           variant="primary"
           disabled={!ready || running}
-          onClick={startMinimal}
+          onClick={start}
           title={ready ? "Run simulation" : "Initializing..."}
         >
           Run

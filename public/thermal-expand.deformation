@@ -13,7 +13,7 @@ angle_style harmonic
 dimension 2 
 boundary p p p
 
-read_data work/minimal_network.lmp
+read_data network.lmp
 
 # --- add coeffs right after read_data ---
 #pair_style      zero 2.5

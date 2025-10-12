@@ -4,7 +4,7 @@ import type { Atom, Bond } from "./model";
 import { generateLmp } from "./parse";
 import CanvasView from "./CanvasView";
 import { useGraph } from "./useGraph";
-import SimPanel from "./SimPanel";
+import Simulation from "./Simulation";
 import { BaseButton } from "./BaseButton";
 
 
@@ -195,26 +195,7 @@ export default function App() {
             removeByIds={removeByIds}
           />
 
-          {showSim && (
-            <div className="absolute inset-0 z-20 bg-white/95 backdrop-blur-sm border-l border-t shadow-lg">
-              <div className="flex items-center gap-2 p-2 border-b bg-white">
-                <div className="font-medium text-sm">Simulation</div>
-                <div className="text-xs text-slate-500 ml-2">
-                  (live view of current network)
-                </div>
-                <BaseButton
-                  variant="ghost"
-                  onClick={() => setShowSim(false)}
-                  className="ml-auto"
-                >
-                  X
-                </BaseButton>
-              </div>
-              <div className="p-2 h-[calc(100%-40px)] overflow-hidden">
-                <SimPanel network={lmp} />
-              </div>
-            </div>
-          )}
+          <SimulationWrapper isOpen={showSim} setIsOpen={setShowSim} lmp={lmp} />
         </div>
 
         <div
@@ -229,3 +210,28 @@ export default function App() {
     </div>
   );
 }
+
+const SimulationWrapper = ({ isOpen, setIsOpen, lmp }: { isOpen: boolean, setIsOpen: (isOpen: boolean) => void, lmp: string }) =>
+  <div className="absolute inset-0 z-20 bg-white/95 border-l border-t" style={{
+    visibility: isOpen ? "visible" : "hidden",
+    opacity: isOpen ? 1 : 0,
+    pointerEvents: isOpen ? "auto" : "none",
+  }}>
+    <div className="flex items-center justify-between gap-2 p-2 border-b bg-white">
+      <div>
+        <div className="font-medium text-sm">Simulation</div>
+        <div className="text-xs text-slate-500">
+          (live view of current network)
+        </div>
+      </div>
+      <BaseButton
+        variant="ghost"
+        onClick={() => setIsOpen(false)}
+      >
+        X
+      </BaseButton>
+    </div>
+    <div className="p-2 h-[calc(100%-40px)] overflow-hidden">
+      <Simulation network={lmp} isOpen={isOpen} />
+    </div>
+  </div>

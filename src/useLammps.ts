@@ -7,6 +7,7 @@ type LammpsModule = {
   FS: any;
   LAMMPSWeb: new () => LammpsWeb;
 };
+const base = "/work";
 
 export function useLammps(onPrint: (s: string) => void, network: string) {
   const [ready, setReady] = useState(false);
@@ -67,31 +68,34 @@ export function useLammps(onPrint: (s: string) => void, network: string) {
     return { lx: vals[0], ly: vals[1], lz: vals[2] };
   }, []);
 
-  const startMinimal = useCallback(async () => {
+  const start = useCallback(async () => {
+    console.log('start')
     const { M, lmp } = await initLammps();
 
-    const [inTxt, dataTxt] = await Promise.all([
-      fetch(`${import.meta.env.BASE_URL}/thermal-expand.deformation`).then(r => r.text()),
-      network,
-    ]);
+    const inTxt = await
+      fetch(`${import.meta.env.BASE_URL}/thermal-expand.deformation`).then(r => r.text())
 
-    const base = "/work";
-    try { M.FS.mkdir(base); } catch { }
-    M.FS.writeFile(`${base}/in.lmp`, "echo none\nlog none\nclear\n" + inTxt);
-    M.FS.writeFile(`${base}/minimal_network.lmp`, dataTxt);
+    M.FS.writeFile(`in.lmp`, "echo none\nlog none\nclear\n" + inTxt);
+    setNetwork();
 
     setRunning(true);
     lmp.setSyncFrequency(1);
     lmp.start();
 
-    lmp.runFile(`${base}/in.lmp`);
+    lmp.runFile(`in.lmp`);
   }, []);
+
+  const setNetwork = async () => {
+    const { M } = await initLammps();
+
+    M.FS.writeFile(`network.lmp`, network);
+  }
 
   const runFrames = useCallback(async (n: number) => { lmpRef.current?.runCommand(`run ${n}`); }, [])
   const stop = useCallback(() => {
-    lmpRef.current!.stop();
+    lmpRef.current?.stop();
     setRunning(false);
   }, []);
 
-  return { ready, running, startMinimal, stop, readPositions, readBonds, runFrames, readBox };
+  return { ready, running, start, stop, readPositions, readBonds, runFrames, readBox, setNetwork };
 }
