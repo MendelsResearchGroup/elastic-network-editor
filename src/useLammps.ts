@@ -1,50 +1,43 @@
 import { useCallback, useRef, useState } from "react";
-import type { BufferView, LammpsWeb, ScalarType } from "./types/lammps-web";
-import createModule from "./wasm/lammps.js";
+// import type { BufferView, ScalarType } from "./types/lammps-web";
+import createModule from "lammps.js";
+import type { LAMMPSWeb, BufferView, LammpsModule} from "lammps.js";
 
-type LammpsModule = {
-  HEAPF32: Float32Array;
-  HEAPF64: Float64Array;
-  HEAP32: Int32Array;
-  HEAP64: BigInt64Array;
-  ScalarType: typeof ScalarType;
-  FS: any;
-  LAMMPSWeb: new () => LammpsWeb;
-};
+
 // const base = "/work";
 
-export function useLammps(onPrint: (s: string) => void, network: string) {
+export function useLammps(onPrint: (...args: unknown[]) => void, network: string) {
   const [ready, setReady] = useState(false);
   const [running, setRunning] = useState(false);
   const modRef = useRef<LammpsModule | null>(null);
-  const lmpRef = useRef<LammpsWeb | null>(null);
+  const lmpRef = useRef<LAMMPSWeb | null>(null);
 
   const resolveView = (M: LammpsModule, view: BufferView) => {
-      if (!view.ptr || !view.length) return null;
+    if (!view.ptr || !view.length) return null;
 
-      switch (view.type) {
-        case M.ScalarType.Float32: {
-          const start = view.ptr >> 2;
-          return M.HEAPF32.subarray(start, start + view.length);
-        }
-        case M.ScalarType.Float64: {
-          const start = view.ptr >> 3;
-          return M.HEAPF64.subarray(start, start + view.length);
-        }
-        case M.ScalarType.Int32: {
-          const start = view.ptr >> 2;
-          return M.HEAP32.subarray(start, start + view.length);
-        }
-        case M.ScalarType.Int64: {
-          const start = view.ptr >> 3;
-          return M.HEAP64.subarray(start, start + view.length);
-        }
-        default:
-          return null;
+    switch (view.type) {
+      case M.ScalarType.Float32: {
+        const start = view.ptr >> 2;
+        return M.HEAPF32.subarray(start, start + view.length);
       }
-    };
+      case M.ScalarType.Float64: {
+        const start = view.ptr >> 3;
+        return M.HEAPF64.subarray(start, start + view.length);
+      }
+      case M.ScalarType.Int32: {
+        const start = view.ptr >> 2;
+        return M.HEAP32.subarray(start, start + view.length);
+      }
+      case M.ScalarType.Int64: {
+        const start = view.ptr >> 3;
+        return M.HEAP64.subarray(start, start + view.length);
+      }
+      default:
+        return null;
+    }
+  };
 
-    
+
   const initLammps = useCallback(async () => {
     if (modRef.current && lmpRef.current) { return { M: modRef.current, lmp: lmpRef.current }; }
 
