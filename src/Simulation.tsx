@@ -1,9 +1,10 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef } from "react";
 import * as THREE from "three";
 
 // @ts-ignore
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls";
 import { useLammps } from "./useLammps";
+import type { SimulationScriptSpec } from "./useLammps";
 import { BaseButton } from "./BaseButton";
 
 
@@ -21,9 +22,19 @@ const ATOM = 0x2563eb;
 const BOND = 0x334155;
 const BOX = 0x1f2937;
 
-export default function Simulation({ network, isOpen, autoPlay = true }: { network: string; isOpen: boolean; autoPlay?: boolean }) {
+export default function Simulation({
+  network,
+  isOpen,
+  autoPlay = true,
+  script,
+}: {
+  network: string;
+  isOpen: boolean;
+  autoPlay?: boolean;
+  script: SimulationScriptSpec;
+}) {
   const { ready, running, start, stop, readPositions, readBonds, runFrames, readBox, setNetwork } =
-    useLammps(() => {}, network);
+    useLammps(() => {}, network, script);
 
   const host = useRef<HTMLDivElement>(null);
   const three = useRef<{
@@ -41,14 +52,52 @@ export default function Simulation({ network, isOpen, autoPlay = true }: { netwo
   const rafTick = useRef<number>(0);
   const scrubbing = useRef(false);
   const followLive = useRef(true);
+  const autoResumeRef = useRef(autoPlay);
 
   const frames = useRef<Frame[]>([]);
   const frameIdx = useRef(0);
-  const [inputFrameIdx, setInputFrameIdx] = useState(frameIdx.current);
+  const frameInputRef = useRef<HTMLInputElement>(null);
+  const frameLabelRef = useRef<HTMLSpanElement>(null);
+  const prevScriptId = useRef(script.id);
+  const updateScrubberUi = useCallback(() => {
+    if (frameInputRef.current) {
+      frameInputRef.current.max = Math.max(0, frames.current.length - 1).toString();
+      frameInputRef.current.value = frameIdx.current.toString();
+    }
+    if (frameLabelRef.current) {
+      frameLabelRef.current.textContent = frames.current.length
+        ? `${frameIdx.current + 1}/${frames.current.length}`
+        : "—";
+    }
+  }, []);
+  const handleRun = useCallback(() => {
+    autoResumeRef.current = true;
+    start();
+  }, [start]);
+  const handlePause = useCallback(() => {
+    autoResumeRef.current = false;
+    stop();
+  }, [stop]);
 
-  useEffect(() => { frameIdx.current = inputFrameIdx; }, [inputFrameIdx]);
-
-  useEffect(() => {setNetwork()}, [network])
+  useEffect(() => {
+    setNetwork().catch((err) => {
+      console.error("Failed to sync network with LAMMPS FS", err);
+    });
+  }, [network, setNetwork]);
+  useEffect(() => {
+    if (prevScriptId.current === script.id) return;
+    prevScriptId.current = script.id;
+    frames.current = [];
+    frameIdx.current = 0;
+    followLive.current = true;
+    if (frameInputRef.current) frameInputRef.current.value = "0";
+    updateScrubberUi();
+    autoResumeRef.current = autoPlay;
+    stop();
+    if (autoResumeRef.current && isOpen) {
+      start();
+    }
+  }, [script.id, autoPlay, isOpen, start, stop]);
   useEffect(() => {
     if (!isOpen) {
       stop();
@@ -153,7 +202,9 @@ export default function Simulation({ network, isOpen, autoPlay = true }: { netwo
     window.addEventListener("resize", onResize);
     onResize();
 
-    autoPlay && start();
+    if (autoResumeRef.current && autoPlay) {
+      start();
+    }
 
     return () => {
       if (rafRender.current) cancelAnimationFrame(rafRender.current);
@@ -173,7 +224,7 @@ export default function Simulation({ network, isOpen, autoPlay = true }: { netwo
         three.current = null;
       }
     };
-  }, [isOpen]);
+  }, [autoPlay, isOpen, start, stop]);
 
   const drawAtoms = (pos: Float32Array) => {
     if (!three.current) return;
@@ -292,11 +343,16 @@ const drawBoxSurface = (corners: Float32Array, mesh: THREE.Mesh) => {
 };
 
   useEffect(() => {
+    updateScrubberUi();
+  }, [updateScrubberUi]);
+
+  useEffect(() => {
     if (!three.current || !running || !isOpen) return;
 
     frames.current = [];
     frameIdx.current = 0;
     followLive.current = true;
+    updateScrubberUi();
 
     let active = true;
 
@@ -324,17 +380,17 @@ const drawBoxSurface = (corners: Float32Array, mesh: THREE.Mesh) => {
           }
         }
 
-        frames.current = [
-          ...frames.current,
-          {
-            pos: posCopy,
-            bondsPacked,
-            bondCount: bondsSnap.count,
-            boxOutline,
-            boxSurface,
-          },
-        ];
-        if (followLive.current && !scrubbing.current) frameIdx.current = frames.current.length - 1;
+        frames.current.push({
+          pos: posCopy,
+          bondsPacked,
+          bondCount: bondsSnap.count,
+          boxOutline,
+          boxSurface,
+        });
+        if (followLive.current && !scrubbing.current) {
+          frameIdx.current = frames.current.length - 1;
+        }
+        updateScrubberUi();
       }
 
       rafTick.current = requestAnimationFrame(tick);
@@ -345,22 +401,24 @@ const drawBoxSurface = (corners: Float32Array, mesh: THREE.Mesh) => {
       active = false;
       if (rafTick.current) cancelAnimationFrame(rafTick.current);
     };
-  }, [running, readPositions, readBonds, runFrames, isOpen]);
+  }, [running, readPositions, readBonds, runFrames, isOpen, updateScrubberUi]);
 
-  // ---------- draw scrubbed frame ----------
-  useEffect(() => {
+  const onScrubStart = () => { scrubbing.current = true; followLive.current = false; };
+  const onScrubEnd = () => { scrubbing.current = false; };
+
+  const drawFrameIdx = useCallback((idx: number) => {
     if (!three.current || !frames.current.length) return;
-    const f = frames.current[frameIdx.current];
+    const clamped = Math.max(0, Math.min(idx, frames.current.length - 1));
+    frameIdx.current = clamped;
+    const f = frames.current[clamped];
     drawAtoms(f.pos);
     drawBondsPacked(f.bondsPacked, f.bondCount);
     if (three.current) {
       drawBoxOutline(f.boxOutline, three.current.boxOutline);
       drawBoxSurface(f.boxSurface, three.current.boxSurface);
     }
-  }, [inputFrameIdx]);
-
-  const onScrubStart = () => { scrubbing.current = true; followLive.current = false; };
-  const onScrubEnd = () => { scrubbing.current = false; };
+    updateScrubberUi();
+  }, [updateScrubberUi]);
   
   return (
     <div className="border rounded p-3 flex flex-col gap-2 bg-white">
@@ -368,7 +426,7 @@ const drawBoxSurface = (corners: Float32Array, mesh: THREE.Mesh) => {
         <BaseButton
           variant="primary"
           disabled={!ready || running}
-          onClick={start}
+          onClick={handleRun}
           title={ready ? "Run simulation" : "Initializing..."}
         >
           Run
@@ -377,27 +435,26 @@ const drawBoxSurface = (corners: Float32Array, mesh: THREE.Mesh) => {
         <BaseButton
           variant="ghost"
           disabled={!running}
-          onClick={stop}
+          onClick={handlePause}
           title={running ? "Stop simulation" : "Not running"}
         >
           Pause
         </BaseButton>
 
         <input
+          ref={frameInputRef}
           type="range"
           min={0}
-          max={Math.max(0, frames.current.length - 1)}
-          value={frameIdx.current}
-          onChange={(e) => setInputFrameIdx(+e.target.value)}
+          max={0}
+          defaultValue={0}
+          onChange={(e) => drawFrameIdx(+e.target.value)}
           onMouseDown={onScrubStart}
           onMouseUp={onScrubEnd}
           onTouchStart={onScrubStart}
           onTouchEnd={onScrubEnd}
           className="flex-1 accent-slate-900 cursor-pointer"
         />
-        <span className="text-xs w-16 text-right tabular-nums">
-          {frames.current.length ? `${frameIdx.current + 1}/${frames.current.length}` : "—"}
-        </span>
+        <span ref={frameLabelRef} className="text-xs w-16 text-right tabular-nums">—</span>
       </div>
 
       <div ref={host} className="w-full aspect-square" />

@@ -7,7 +7,22 @@ import { useGraph } from "./useGraph";
 import Simulation from "./Simulation";
 import { BaseButton } from "./BaseButton";
 
-
+const SIMULATION_SCRIPTS = [
+  {
+    id: "thermal-expand",
+    label: "Thermal Expansion",
+    path: "/thermal-expand.deformation",
+  },
+  {
+    id: "auxetic-compress",
+    label: "Auxetic Compression",
+    path: "/auxetic/compress.deformation",
+    assets: [
+      { path: "/auxetic/init.mod", target: "init.mod" },
+      { path: "/auxetic/potential.mod", target: "potential.mod" },
+    ],
+  },
+] as const;
 
 function AtomTable({
   rows,
@@ -96,13 +111,13 @@ export default function App() {
 
   const [zoomPercent, setZoomPercent] = useState(200);
   const [showSim, setShowSim] = useState(false);
+  const [simulationScriptId, setSimulationScriptId] =
+    useState<typeof SIMULATION_SCRIPTS[number]["id"]>("thermal-expand");
   const scale = zoomPercent / 100;
 
-
-  const lmp = useMemo(
-    () => generateLmp(atoms, bonds),
-    [atoms, bonds]
-  );
+  const lmp = useMemo(() => generateLmp(atoms, bonds), [atoms, bonds]);
+  const simulationScript =
+    SIMULATION_SCRIPTS.find((s) => s.id === simulationScriptId) ?? SIMULATION_SCRIPTS[0];
 
   const fileRef = useRef<HTMLInputElement>(null);
   const onPickFile = () => fileRef.current?.click();
@@ -161,6 +176,27 @@ export default function App() {
           Simulate
         </BaseButton>
 
+        <div className="flex items-center gap-2">
+          <label className="text-sm text-slate-600" htmlFor="simulation-script">
+            Script
+          </label>
+          <select
+            id="simulation-script"
+            className="border border-slate-300 rounded-md px-2 py-1 text-sm bg-white"
+            value={simulationScriptId}
+            onChange={(e) =>
+              setSimulationScriptId(e.target.value as typeof simulationScriptId)
+            }
+            title="Choose which simulation input script to run"
+          >
+            {SIMULATION_SCRIPTS.map((s) => (
+              <option key={s.id} value={s.id}>
+                {s.label}
+              </option>
+            ))}
+          </select>
+        </div>
+
         <div className="ml-auto flex items-center gap-2">
           <span className="text-sm">Zoom</span>
           <input
@@ -195,7 +231,12 @@ export default function App() {
             removeByIds={removeByIds}
           />
 
-          <SimulationWrapper isOpen={showSim} setIsOpen={setShowSim} lmp={lmp} />
+          <SimulationWrapper
+            isOpen={showSim}
+            setIsOpen={setShowSim}
+            lmp={lmp}
+            script={simulationScript}
+          />
         </div>
 
         <div
@@ -211,7 +252,19 @@ export default function App() {
   );
 }
 
-const SimulationWrapper = ({ isOpen, setIsOpen, lmp }: { isOpen: boolean, setIsOpen: (isOpen: boolean) => void, lmp: string }) =>
+type SimulationScript = (typeof SIMULATION_SCRIPTS)[number];
+
+const SimulationWrapper = ({
+  isOpen,
+  setIsOpen,
+  lmp,
+  script,
+}: {
+  isOpen: boolean;
+  setIsOpen: (isOpen: boolean) => void;
+  lmp: string;
+  script: SimulationScript;
+}) =>
   <div className="absolute inset-0 z-20 bg-white/95 border-l border-t" style={{
     visibility: isOpen ? "visible" : "hidden",
     opacity: isOpen ? 1 : 0,
@@ -219,9 +272,11 @@ const SimulationWrapper = ({ isOpen, setIsOpen, lmp }: { isOpen: boolean, setIsO
   }}>
     <div className="flex items-center justify-between gap-2 p-2 border-b bg-white">
       <div>
-        <div className="font-medium text-sm">Simulation</div>
-        <div className="text-xs text-slate-500">
-          (live view of current network)
+        <div>
+          <div className="font-medium text-sm">Simulation · {script.label}</div>
+          <div className="text-xs text-slate-500">
+            (live view of current network)
+          </div>
         </div>
       </div>
       <BaseButton
@@ -232,6 +287,6 @@ const SimulationWrapper = ({ isOpen, setIsOpen, lmp }: { isOpen: boolean, setIsO
       </BaseButton>
     </div>
     <div className="p-2 h-[calc(100%-40px)] overflow-hidden">
-      <Simulation network={lmp} isOpen={isOpen} />
+      <Simulation network={lmp} isOpen={isOpen} script={script} />
     </div>
   </div>

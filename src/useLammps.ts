@@ -1,16 +1,23 @@
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 // import type { BufferView, ScalarType } from "./types/lammps-web";
 import createModule from "lammps.js";
 import type { LAMMPSWeb, BufferView, LammpsModule} from "lammps.js";
 
+type ScriptAsset = { path: string; target?: string };
+export type SimulationScriptSpec = { id: string; label: string; path: string; assets?: ReadonlyArray<ScriptAsset> };
 
 // const base = "/work";
 
-export function useLammps(onPrint: (...args: unknown[]) => void, network: string) {
+export function useLammps(
+  onPrint: (...args: unknown[]) => void,
+  network: string,
+  script: SimulationScriptSpec
+) {
   const [ready, setReady] = useState(false);
   const [running, setRunning] = useState(false);
   const modRef = useRef<LammpsModule | null>(null);
   const lmpRef = useRef<LAMMPSWeb | null>(null);
+  const scriptRef = useRef<SimulationScriptSpec>(script);
 
   const resolveView = (M: LammpsModule, view: BufferView) => {
     if (!view.ptr || !view.length) return null;
@@ -53,6 +60,46 @@ export function useLammps(onPrint: (...args: unknown[]) => void, network: string
 
     return { M: Module, lmp };
   }, [onPrint]);
+
+  const fetchText = useCallback(async (resourcePath: string) => {
+    const base = import.meta.env.BASE_URL ?? "/";
+    const normalizedBase = base.endsWith("/") ? base : `${base}/`;
+    const cleanedPath = resourcePath.replace(/^\/+/, "");
+    const res = await fetch(`${normalizedBase}${cleanedPath}`);
+    if (!res.ok) {
+      throw new Error(`Failed to load ${resourcePath}: ${res.status} ${res.statusText}`);
+    }
+    return res.text();
+  }, []);
+
+  const prepareScript = useCallback(
+    async (spec: SimulationScriptSpec) => {
+      const { M } = await initLammps();
+      const scriptBody = await fetchText(spec.path);
+      M.FS.writeFile("in.lmp", `echo none\nlog none\nclear\n${scriptBody}`);
+      if (spec.assets) {
+        for (const asset of spec.assets) {
+          const assetBody = await fetchText(asset.path);
+          const target =
+            asset.target ??
+            asset.path
+              .split("/")
+              .filter(Boolean)
+              .pop() ??
+            "asset.mod";
+          M.FS.writeFile(target, assetBody);
+        }
+      }
+    },
+    [fetchText, initLammps]
+  );
+
+  useEffect(() => {
+    scriptRef.current = script;
+    prepareScript(script).catch((err) => {
+      console.error("Failed to preload LAMMPS script", err);
+    });
+  }, [script, prepareScript]);
 
   const readPositions = useCallback(() => {
     const M = modRef.current, lmp = lmpRef.current;
@@ -108,30 +155,33 @@ export function useLammps(onPrint: (...args: unknown[]) => void, network: string
   }, []);
 
 
-  const start = useCallback(async () => {
-    console.log('start')
-    const { M, lmp } = await initLammps();
-
-    const inTxt = await
-      fetch(`${import.meta.env.BASE_URL}/thermal-expand.deformation`).then(r => r.text())
-
-    M.FS.writeFile(`in.lmp`, "echo none\nlog none\nclear\n" + inTxt);
-    setNetwork();
-
-    setRunning(true);
-    // lmp.setSyncFrequency(1);
-    lmp.start();
-
-    lmp.runFile(`in.lmp`);
-  }, []);
-
-  const setNetwork = async () => {
+  const setNetwork = useCallback(async () => {
     const { M } = await initLammps();
+    M.FS.writeFile("network.lmp", network);
+  }, [initLammps, network]);
 
-    M.FS.writeFile(`network.lmp`, network);
-  }
+  useEffect(() => {
+    setNetwork().catch((err) => {
+      console.error("Failed to sync network with LAMMPS FS", err);
+    });
+  }, [setNetwork]);
 
-  const runFrames = useCallback(async (n: number) => { lmpRef.current?.advance(n, true, true); }, [])
+  const start = useCallback(async () => {
+    try {
+      const { lmp } = await initLammps();
+      lmp.stop();
+      await prepareScript(scriptRef.current);
+      await setNetwork();
+      setRunning(true);
+      lmp.start();
+      lmp.runFile("in.lmp");
+    } catch (err) {
+      console.error("Failed to start LAMMPS", err);
+      setRunning(false);
+    }
+  }, [initLammps, prepareScript, setNetwork]);
+
+  const runFrames = useCallback(async (n: number) => { lmpRef.current?.advance(n, true, true); }, []);
   const stop = useCallback(() => {
     lmpRef.current?.stop();
     setRunning(false);
