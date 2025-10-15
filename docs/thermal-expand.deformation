@@ -1,0 +1,42 @@
+variable alat equal 3.8848589
+variable xdim equal ${alat}*5
+variable Tstart equal 0.001
+variable Tend equal 0.01
+variable dt equal 0.002
+variable Srandomseed equal 1001
+
+clear
+units lj
+atom_style full
+bond_style harmonic
+angle_style harmonic
+dimension 2 
+boundary p p p
+
+read_data network.lmp
+
+# --- add coeffs right after read_data ---
+#pair_style      zero 2.5
+#pair_coeff      * *
+
+
+timestep ${dt}
+
+fix f2d all enforce2d
+velocity all create 0.1 ${Srandomseed} mom yes rot yes dist gaussian
+
+variable tdamp equal 100*${dt}
+variable pdamp equal 1000*${dt}
+fix baro all npt temp ${Tstart} ${Tend} ${tdamp} x 0.0 0.0 ${pdamp} y 0.0 0.0 ${pdamp} couple xy
+
+thermo 100
+thermo_style custom step temp pe lx ly press pxx pyy
+thermo_modify lost ignore flush yes
+
+variable step equal step
+variable T    equal temp
+variable A equal lx*ly
+fix j all print 100 """{"step": $(step), "T": $(temp), "lx": $(lx), "ly": $(ly), "area": $(v_A)}""" title "" file output.json screen no
+
+dump 1 all custom 100 dump.lammpstrj id type xu yu zu
+
