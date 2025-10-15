@@ -5,14 +5,12 @@ variable srate equal 1e-05
 variable M equal 1000 # averaging time for properties
 variable strainsteps equal ${strain}/${dt}/${srate}
 
-
-dimension 2
 include init.mod
 include potential.mod
 
 
 #change_box all triclinic
-comm_modify mode single cutoff 10.0 vel yes
+comm_modify mode single cutoff 6.0 vel yes
 atom_modify sort 0 0
 
 
@@ -33,8 +31,8 @@ variable nsteps equal round(${strainsteps})
 #fix             4 all nve
 #fix		     6 all press/berendsen y  0.0 0.0 1 x 0.0 0.0 10
 #fix             6 all npt temp 0.0001 0.0001 1000.0 y 0.0 0.0 1000.0
-fix             5 all langevin 1e-07 1e-07 10.0 904297
-fix             6 all nph y 0.0 0.0 1000.0 ptemp 0.0001
+fix             5 all langevin 0.02 0.02 5.0 904297
+fix             6 all nph y 0.0 0.0 200.0 ptemp 0.02
 fix     	     9 all deform 1 x erate -${srate} units box remap x
 
 # For PLUMED2

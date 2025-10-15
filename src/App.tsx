@@ -112,7 +112,7 @@ export default function App() {
   const [zoomPercent, setZoomPercent] = useState(200);
   const [showSim, setShowSim] = useState(false);
   const [simulationScriptId, setSimulationScriptId] =
-    useState<typeof SIMULATION_SCRIPTS[number]["id"]>("thermal-expand");
+    useState<typeof SIMULATION_SCRIPTS[number]["id"]>("auxetic-compress");
   const scale = zoomPercent / 100;
 
   const lmp = useMemo(() => generateLmp(atoms, bonds), [atoms, bonds]);
