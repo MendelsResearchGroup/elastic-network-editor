@@ -1,4 +1,3 @@
-
 # NOTE: This script can be modified for different pair styles 
 # See in.elastic for more info.
 

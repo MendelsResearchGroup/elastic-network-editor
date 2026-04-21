@@ -67,6 +67,19 @@ Visit the printed local address (normally `http://localhost:5173`). The app also
 - `npm run preview` – serve the production build locally.
 - `npm run lint` – run ESLint across the project.
 
+## GitHub Pages
+
+This repo includes a Pages deploy workflow at `.github/workflows/deploy-pages.yml`.
+
+One-time setup in GitHub:
+
+- Open `Settings > Pages`
+- Set `Source` to `GitHub Actions`
+
+After that, every push to `main` will build the app and publish `dist/` to:
+
+- `https://mendelsresearchgroup.github.io/elastic-network-editor/`
+
 ## Notes
 
 - WebAssembly memory is finite; extremely dense networks may exhaust the default allocation. If that happens, raise the `-s TOTAL_MEMORY` flag in your LAMMPS build or trim the structure.

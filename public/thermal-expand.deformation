@@ -39,4 +39,4 @@ variable A equal lx*ly
 fix j all print 100 """{"step": $(step), "T": $(temp), "lx": $(lx), "ly": $(ly), "area": $(v_A)}""" title "" file output.json screen no
 
 dump 1 all custom 100 dump.lammpstrj id type xu yu zu
-
+run 100000

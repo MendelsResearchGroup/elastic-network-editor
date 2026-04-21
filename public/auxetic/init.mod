@@ -9,12 +9,12 @@ atom_style      full
 bond_style      harmonic
 angle_style     harmonic
 dihedral_style  none
-special_bonds   none
+special_bonds   lj/coul 0.0 0.0 0.0
 boundary        p p p
 
 # set a unit mass for the single atom type in reduced units
-mass 1 1.0
 read_data network.lmp
+mass 1 1.0
 
 # Minimisation tolerances tuned for reduced units
 variable etol equal 1.0e-8

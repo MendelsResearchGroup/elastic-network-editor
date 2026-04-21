@@ -4,9 +4,8 @@ import * as THREE from "three";
 // @ts-ignore
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls";
 import { useLammps } from "./useLammps";
-import type { SimulationScriptSpec } from "./useLammps";
+import type { SimulationScriptSpec, StepFrame } from "./useLammps";
 import { BaseButton } from "./BaseButton";
-
 
 type BondsView = { count: number; p1: Float32Array; p2: Float32Array };
 type Frame = {
@@ -15,6 +14,11 @@ type Frame = {
   bondCount: number;
   boxOutline: Float32Array;
   boxSurface: Float32Array;
+};
+type Canvas2DState = {
+  canvas: HTMLCanvasElement;
+  ctx: CanvasRenderingContext2D;
+  dpr: number;
 };
 
 const BG = 0xffffff;
@@ -33,8 +37,12 @@ export default function Simulation({
   autoPlay?: boolean;
   script: SimulationScriptSpec;
 }) {
-  const { ready, running, start, stop, readPositions, readBonds, runFrames, readBox, setNetwork } =
-    useLammps(() => {}, network, script);
+  const logLammps = useCallback((...args: unknown[]) => {
+    console.log("[LAMMPS]", ...args);
+  }, []);
+
+  const { ready, running, start, stop, reset, setNetwork, setOnStep } =
+    useLammps(logLammps, network, script);
 
   const host = useRef<HTMLDivElement>(null);
   const three = useRef<{
@@ -47,18 +55,22 @@ export default function Simulation({
     boxSurface: THREE.Mesh;
     controls: OrbitControls;
   } | null>(null);
+  const canvas2d = useRef<Canvas2DState | null>(null);
 
   const rafRender = useRef<number>(0);
-  const rafTick = useRef<number>(0);
   const scrubbing = useRef(false);
   const followLive = useRef(true);
   const autoResumeRef = useRef(autoPlay);
+  const lastStep = useRef<number>(-1);
+  const isOpenRef = useRef(isOpen);
+  const hasFramedView = useRef(false);
 
   const frames = useRef<Frame[]>([]);
   const frameIdx = useRef(0);
   const frameInputRef = useRef<HTMLInputElement>(null);
   const frameLabelRef = useRef<HTMLSpanElement>(null);
   const prevScriptId = useRef(script.id);
+
   const updateScrubberUi = useCallback(() => {
     if (frameInputRef.current) {
       frameInputRef.current.max = Math.max(0, frames.current.length - 1).toString();
@@ -70,141 +82,203 @@ export default function Simulation({
         : "—";
     }
   }, []);
+
+  const clearRenderedFrame = useCallback(() => {
+    if (three.current) {
+      drawAtoms(new Float32Array(0));
+      drawBondsPacked(new Float32Array(0), 0);
+      drawBoxOutline(new Float32Array(0), three.current.boxOutline);
+      drawBoxSurface(new Float32Array(0), three.current.boxSurface);
+    } else if (canvas2d.current) {
+      drawFallback2D(new Float32Array(0), new Float32Array(0), 0, new Float32Array(0));
+    }
+  }, []);
+
+  const resetViewerState = useCallback(() => {
+    frames.current = [];
+    frameIdx.current = 0;
+    followLive.current = true;
+    scrubbing.current = false;
+    lastStep.current = -1;
+    hasFramedView.current = false;
+    if (frameInputRef.current) {
+      frameInputRef.current.value = "0";
+    }
+    clearRenderedFrame();
+    updateScrubberUi();
+  }, [clearRenderedFrame, updateScrubberUi]);
+
   const handleRun = useCallback(() => {
     autoResumeRef.current = true;
     start();
   }, [start]);
+
   const handlePause = useCallback(() => {
     autoResumeRef.current = false;
     stop();
   }, [stop]);
 
   useEffect(() => {
+    isOpenRef.current = isOpen;
+  }, [isOpen]);
+
+  useEffect(() => {
     setNetwork().catch((err) => {
       console.error("Failed to sync network with LAMMPS FS", err);
     });
   }, [network, setNetwork]);
+
   useEffect(() => {
     if (prevScriptId.current === script.id) return;
     prevScriptId.current = script.id;
-    frames.current = [];
-    frameIdx.current = 0;
-    followLive.current = true;
-    if (frameInputRef.current) frameInputRef.current.value = "0";
-    updateScrubberUi();
+    resetViewerState();
     autoResumeRef.current = autoPlay;
-    stop();
-    if (autoResumeRef.current && isOpen) {
-      start();
-    }
-  }, [script.id, autoPlay, isOpen, start, stop]);
+    reset();
+    if (autoResumeRef.current && isOpen) start();
+  }, [script.id, autoPlay, isOpen, reset, resetViewerState, start]);
+
   useEffect(() => {
     if (!isOpen) {
       stop();
       return;
     }
 
-    if (!host.current || three.current) return;
-
-    const s = new THREE.Scene();
-    s.background = new THREE.Color(BG);
-
-    const r = new THREE.WebGLRenderer({ antialias: true });
-    r.setPixelRatio(window.devicePixelRatio || 1);
-    r.setSize(550, 550);
-    r.outputColorSpace = THREE.SRGBColorSpace;
-    r.toneMapping = THREE.ACESFilmicToneMapping;
+    const mount = host.current;
+    if (!mount || three.current || canvas2d.current) return;
+    mount.innerHTML = "";
 
     const viewSize = 8;
-    const cam = new THREE.OrthographicCamera(-viewSize / 2, viewSize / 2, viewSize / 2, -viewSize / 2, 0.1, 100);
-    cam.position.set(0, 0, 10);
-    cam.up.set(0, 1, 0);
-    cam.lookAt(0, 0, 0);
+    const initWebGL = () => {
+      const s = new THREE.Scene();
+      s.background = new THREE.Color(BG);
 
-    host.current.innerHTML = "";
-    host.current.appendChild(r.domElement);
+      const r = new THREE.WebGLRenderer({ antialias: true });
+      r.setPixelRatio(window.devicePixelRatio || 1);
+      r.setSize(550, 550);
+      r.outputColorSpace = THREE.SRGBColorSpace;
+      r.toneMapping = THREE.ACESFilmicToneMapping;
 
-    const atoms = new THREE.InstancedMesh(
-      new THREE.SphereGeometry(0.12, 24, 20),
-      new THREE.MeshStandardMaterial({ color: ATOM, metalness: 0.05, roughness: 0.6 }),
-      20000
-    );
+      const cam = new THREE.OrthographicCamera(
+        -viewSize / 2,
+        viewSize / 2,
+        viewSize / 2,
+        -viewSize / 2,
+        0.1,
+        100
+      );
+      cam.position.set(0, 0, 10);
+      cam.up.set(0, 1, 0);
+      cam.lookAt(0, 0, 0);
 
-    const bonds = new THREE.LineSegments(
-      new THREE.BufferGeometry(),
-      new THREE.LineBasicMaterial({ color: BOND, linewidth: 1 })
-    );
+      mount.appendChild(r.domElement);
 
-    const boxOutline = new THREE.LineLoop(
-      new THREE.BufferGeometry(),
-      new THREE.LineBasicMaterial({ color: BOX, linewidth: 1 })
-    );
+      const atoms = new THREE.InstancedMesh(
+        new THREE.SphereGeometry(0.12, 24, 20),
+        new THREE.MeshStandardMaterial({ color: ATOM, metalness: 0.05, roughness: 0.6 }),
+        20000
+      );
+      const bonds = new THREE.LineSegments(
+        new THREE.BufferGeometry(),
+        new THREE.LineBasicMaterial({ color: BOND, linewidth: 1 })
+      );
+      const boxOutline = new THREE.LineLoop(
+        new THREE.BufferGeometry(),
+        new THREE.LineBasicMaterial({ color: BOX, linewidth: 1 })
+      );
+      const boxSurfaceGeometry = new THREE.BufferGeometry();
+      boxSurfaceGeometry.setAttribute("position", new THREE.BufferAttribute(new Float32Array(12), 3));
+      boxSurfaceGeometry.setIndex([0, 1, 2, 0, 2, 3]);
+      const boxSurface = new THREE.Mesh(
+        boxSurfaceGeometry,
+        new THREE.MeshStandardMaterial({
+          color: 0xf1f5f9,
+          transparent: true,
+          opacity: 0.22,
+          metalness: 0.05,
+          roughness: 0.95,
+          side: THREE.DoubleSide,
+        })
+      );
+      boxSurface.position.z = -0.02;
 
-    const boxSurfaceGeometry = new THREE.BufferGeometry();
-    boxSurfaceGeometry.setAttribute(
-      "position",
-      new THREE.BufferAttribute(new Float32Array(12), 3)
-    );
-    boxSurfaceGeometry.setIndex([0, 1, 2, 0, 2, 3]);
-    const boxSurfaceMaterial = new THREE.MeshStandardMaterial({
-      color: 0xf1f5f9,
-      transparent: true,
-      opacity: 0.22,
-      metalness: 0.05,
-      roughness: 0.95,
-      side: THREE.DoubleSide,
-    });
-    const boxSurface = new THREE.Mesh(boxSurfaceGeometry, boxSurfaceMaterial);
-    boxSurface.position.z = -0.02;
+      const hemi = new THREE.HemisphereLight(0xffffff, 0x8090a0, 0.7);
+      const key = new THREE.DirectionalLight(0xffffff, 0.7);
+      key.position.set(2.5, 4, 3);
+      const fill = new THREE.DirectionalLight(0xffffff, 0.25);
+      fill.position.set(-3, 2, -2);
 
-    const hemi = new THREE.HemisphereLight(0xffffff, 0x8090a0, 0.7);
-    const key = new THREE.DirectionalLight(0xffffff, 0.7);
-    key.position.set(2.5, 4, 3);
-    const fill = new THREE.DirectionalLight(0xffffff, 0.25);
-    fill.position.set(-3, 2, -2);
+      const controls = new OrbitControls(cam, r.domElement);
+      controls.enableRotate = true;
+      controls.minPolarAngle = Math.PI / 2;
+      controls.maxPolarAngle = Math.PI / 2;
+      controls.enablePan = true;
+      controls.enableZoom = true;
+      controls.zoomSpeed = 1.2;
+      controls.panSpeed = 0.6;
+      controls.enableDamping = true;
+      controls.dampingFactor = 0.05;
 
-    const controls = new OrbitControls(cam, r.domElement);
-    controls.enableRotate = true;
-    controls.minPolarAngle = Math.PI / 2;
-    controls.maxPolarAngle = Math.PI / 2;
-    controls.enablePan = true;
-    controls.enableZoom = true;
-    controls.zoomSpeed = 1.2;
-    controls.panSpeed = 0.6;
-    controls.enableDamping = true;
-    controls.dampingFactor = 0.05;
+      s.add(hemi, key, fill, boxSurface, atoms, bonds, boxOutline);
+      three.current = { r, cam, s, atoms, bonds, boxOutline, boxSurface, controls };
 
-    s.add(hemi, key, fill, boxSurface, atoms, bonds, boxOutline);
-
-    three.current = { r, cam, s, atoms, bonds, boxOutline, boxSurface, controls };
-
-    const render = () => {
-      controls.update();
-      r.render(s, cam);
-      rafRender.current = requestAnimationFrame(render);
+      const render = () => {
+        if (!three.current) return;
+        controls.update();
+        r.render(s, cam);
+        rafRender.current = requestAnimationFrame(render);
+      };
+      render();
     };
-    render();
+
+    const initCanvas2D = () => {
+      const canvas = document.createElement("canvas");
+      canvas.style.width = "100%";
+      canvas.style.height = "100%";
+      canvas.style.display = "block";
+      const ctx = canvas.getContext("2d");
+      if (!ctx) {
+        const msg = document.createElement("div");
+        msg.className = "h-full w-full grid place-items-center text-sm text-slate-500";
+        msg.textContent = "Unable to initialize renderer in this browser.";
+        mount.appendChild(msg);
+        return;
+      }
+      canvas2d.current = { canvas, ctx, dpr: 1 };
+      mount.appendChild(canvas);
+    };
+
+    try {
+      initWebGL();
+    } catch (err) {
+      console.error("WebGL init failed, using 2D fallback", err);
+      initCanvas2D();
+    }
 
     const onResize = () => {
-      if (!host.current || !three.current) return;
-      const width = Math.min(host.current.getBoundingClientRect().width || 480, 640);
+      const width = Math.min(mount.getBoundingClientRect().width || 480, 640);
       const height = width;
-      three.current.r.setSize(width, height, false);
-
-      const aspect = width / height || 1;
-      const half = viewSize / 2;
-      three.current.cam.left = -half * aspect;
-      three.current.cam.right = half * aspect;
-      three.current.cam.top = half;
-      three.current.cam.bottom = -half;
-      three.current.cam.updateProjectionMatrix();
+      if (three.current) {
+        three.current.r.setSize(width, height, false);
+        const aspect = width / height || 1;
+        const half = viewSize / 2;
+        three.current.cam.left = -half * aspect;
+        three.current.cam.right = half * aspect;
+        three.current.cam.top = half;
+        three.current.cam.bottom = -half;
+        three.current.cam.updateProjectionMatrix();
+      }
+      if (canvas2d.current) {
+        const dpr = Math.max(1, window.devicePixelRatio || 1);
+        canvas2d.current.dpr = dpr;
+        canvas2d.current.canvas.width = Math.max(1, Math.floor(width * dpr));
+        canvas2d.current.canvas.height = Math.max(1, Math.floor(height * dpr));
+      }
     };
+
     window.addEventListener("resize", onResize);
     onResize();
 
-    if (autoResumeRef.current && autoPlay) {
-      start();
-    }
+    if (autoResumeRef.current && autoPlay) start();
 
     return () => {
       if (rafRender.current) cancelAnimationFrame(rafRender.current);
@@ -223,6 +297,10 @@ export default function Simulation({
         three.current.r.domElement.remove();
         three.current = null;
       }
+      if (canvas2d.current) {
+        canvas2d.current.canvas.remove();
+        canvas2d.current = null;
+      }
     };
   }, [autoPlay, isOpen, start, stop]);
 
@@ -233,12 +311,42 @@ export default function Simulation({
     const n = pos.length / 3;
     for (let i = 0; i < n; i++) {
       const i3 = 3 * i;
-      // still on z=0 plane; perspective + lights make them look 3D
       m.makeTranslation(pos[i3], pos[i3 + 1], 0);
       atoms.setMatrixAt(i, m);
     }
     atoms.count = n;
     atoms.instanceMatrix.needsUpdate = true;
+  };
+
+  const fitCameraToPositions = (pos: Float32Array) => {
+    if (!three.current || pos.length < 3) return;
+    const { cam } = three.current;
+    let minX = Number.POSITIVE_INFINITY;
+    let maxX = Number.NEGATIVE_INFINITY;
+    let minY = Number.POSITIVE_INFINITY;
+    let maxY = Number.NEGATIVE_INFINITY;
+    for (let i = 0; i < pos.length; i += 3) {
+      const x = pos[i];
+      const y = pos[i + 1];
+      if (x < minX) minX = x;
+      if (x > maxX) maxX = x;
+      if (y < minY) minY = y;
+      if (y > maxY) maxY = y;
+    }
+    if (!Number.isFinite(minX) || !Number.isFinite(maxX) || !Number.isFinite(minY) || !Number.isFinite(maxY)) return;
+    const width = Math.max(1e-3, maxX - minX);
+    const height = Math.max(1e-3, maxY - minY);
+    const pad = 1.25;
+    const cx = 0.5 * (minX + maxX);
+    const cy = 0.5 * (minY + maxY);
+    const halfY = 0.5 * height * pad;
+    const aspect = (cam.right - cam.left) / Math.max(1e-6, cam.top - cam.bottom);
+    const halfX = Math.max(0.5 * width * pad, halfY * aspect);
+    cam.left = cx - halfX;
+    cam.right = cx + halfX;
+    cam.top = cy + halfY;
+    cam.bottom = cy - halfY;
+    cam.updateProjectionMatrix();
   };
 
   const drawBondsPacked = (packed: Float32Array, count: number) => {
@@ -256,170 +364,239 @@ export default function Simulation({
     geo.computeBoundingSphere();
   };
 
-const packBonds = (b: BondsView) => {
-  const N = b.count;
-  const arr = new Float32Array(6 * N);
-  for (let i = 0; i < N; i++) {
-    const i3 = 3 * i, i6 = 6 * i;
-      arr[i6 + 0] = b.p1[i3 + 0];
+  const drawFallback2D = (pos: Float32Array, packed: Float32Array, bondCount: number, boxOutline: Float32Array) => {
+    const fallback = canvas2d.current;
+    if (!fallback) return;
+    const { canvas, ctx, dpr } = fallback;
+    const width = canvas.width / dpr;
+    const height = canvas.height / dpr;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.clearRect(0, 0, width, height);
+    ctx.fillStyle = "#ffffff";
+    ctx.fillRect(0, 0, width, height);
+
+    let minX = Number.POSITIVE_INFINITY;
+    let maxX = Number.NEGATIVE_INFINITY;
+    let minY = Number.POSITIVE_INFINITY;
+    let maxY = Number.NEGATIVE_INFINITY;
+
+    const scan = (arr: Float32Array) => {
+      for (let i = 0; i + 1 < arr.length; i += 3) {
+        const x = arr[i];
+        const y = arr[i + 1];
+        if (x < minX) minX = x;
+        if (x > maxX) maxX = x;
+        if (y < minY) minY = y;
+        if (y > maxY) maxY = y;
+      }
+    };
+
+    scan(pos);
+    if (boxOutline.length) scan(boxOutline);
+    if (!Number.isFinite(minX) || !Number.isFinite(maxX) || !Number.isFinite(minY) || !Number.isFinite(maxY)) return;
+
+    const pad = 20;
+    const rangeX = Math.max(1e-6, maxX - minX);
+    const rangeY = Math.max(1e-6, maxY - minY);
+    const scale = Math.min((width - 2 * pad) / rangeX, (height - 2 * pad) / rangeY);
+    const offsetX = (width - scale * rangeX) * 0.5 - minX * scale;
+    const offsetY = (height - scale * rangeY) * 0.5 + maxY * scale;
+    const sx = (x: number) => x * scale + offsetX;
+    const sy = (y: number) => offsetY - y * scale;
+
+    if (boxOutline.length >= 12) {
+      ctx.beginPath();
+      ctx.moveTo(sx(boxOutline[0]), sy(boxOutline[1]));
+      for (let i = 3; i + 1 < boxOutline.length; i += 3) {
+        ctx.lineTo(sx(boxOutline[i]), sy(boxOutline[i + 1]));
+      }
+      ctx.closePath();
+      ctx.fillStyle = "rgba(241,245,249,0.55)";
+      ctx.fill();
+      ctx.strokeStyle = "#1f2937";
+      ctx.lineWidth = 1.25;
+      ctx.stroke();
+    }
+
+    if (bondCount > 0) {
+      ctx.beginPath();
+      for (let i = 0; i < bondCount; i++) {
+        const i6 = 6 * i;
+        ctx.moveTo(sx(packed[i6]), sy(packed[i6 + 1]));
+        ctx.lineTo(sx(packed[i6 + 3]), sy(packed[i6 + 4]));
+      }
+      ctx.strokeStyle = "#334155";
+      ctx.lineWidth = 1;
+      ctx.stroke();
+    }
+
+    ctx.fillStyle = "#2563eb";
+    for (let i = 0; i + 1 < pos.length; i += 3) {
+      ctx.beginPath();
+      ctx.arc(sx(pos[i]), sy(pos[i + 1]), 2.5, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  };
+
+  const packBonds = (b: BondsView) => {
+    const N = b.count;
+    const arr = new Float32Array(6 * N);
+    for (let i = 0; i < N; i++) {
+      const i3 = 3 * i;
+      const i6 = 6 * i;
+      arr[i6] = b.p1[i3];
       arr[i6 + 1] = b.p1[i3 + 1];
-      arr[i6 + 2] = 0; // keep bonds on z=0 plane
-      arr[i6 + 3] = b.p2[i3 + 0];
+      arr[i6 + 2] = 0;
+      arr[i6 + 3] = b.p2[i3];
       arr[i6 + 4] = b.p2[i3 + 1];
       arr[i6 + 5] = 0;
     }
-  return arr;
-};
+    return arr;
+  };
 
-const buildBoxCorners = (matrix: Float32Array, origin: Float32Array) => {
-  if (!matrix.length || !origin.length) {
-    return new Float32Array(0);
-  }
-  const ax = matrix[0] ?? 0;
-  const ay = matrix[1] ?? 0;
-  const bx = matrix[3] ?? 0;
-  const by = matrix[4] ?? 0;
-  const ox = origin[0] ?? 0;
-  const oy = origin[1] ?? 0;
+  const buildBoxCorners = (matrix: Float32Array, origin: Float32Array) => {
+    if (!matrix.length || !origin.length) return new Float32Array(0);
+    const ax = matrix[0] ?? 0;
+    const ay = matrix[1] ?? 0;
+    const bx = matrix[3] ?? 0;
+    const by = matrix[4] ?? 0;
+    const ox = origin[0] ?? 0;
+    const oy = origin[1] ?? 0;
+    return new Float32Array([
+      ox, oy, 0,
+      ox + ax, oy + ay, 0,
+      ox + ax + bx, oy + ay + by, 0,
+      ox + bx, oy + by, 0,
+    ]);
+  };
 
-  return new Float32Array([
-    ox, oy, 0,
-    ox + ax, oy + ay, 0,
-    ox + ax + bx, oy + ay + by, 0,
-    ox + bx, oy + by, 0,
-  ]);
-};
-
-const drawBoxOutline = (outline: Float32Array, line: THREE.LineLoop) => {
-  const geo = line.geometry as THREE.BufferGeometry;
-  const attr = geo.getAttribute("position") as THREE.BufferAttribute | null;
-  if (!outline.length) {
-    if (attr) {
-      geo.setDrawRange(0, 0);
+  const drawBoxOutline = (outline: Float32Array, line: THREE.LineLoop) => {
+    const geo = line.geometry as THREE.BufferGeometry;
+    const attr = geo.getAttribute("position") as THREE.BufferAttribute | null;
+    if (!outline.length) {
+      if (attr) geo.setDrawRange(0, 0);
+      return;
     }
-    return;
-  }
-  if (!attr || attr.array.length !== outline.length) {
-    geo.setAttribute("position", new THREE.BufferAttribute(outline.slice() as any, 3));
-  } else {
-    (attr.array as Float32Array).set(outline);
-    attr.needsUpdate = true;
-  }
-  const updated = geo.getAttribute("position") as THREE.BufferAttribute;
-  updated.needsUpdate = true;
-  geo.setDrawRange(0, outline.length / 3);
-  geo.computeBoundingSphere();
-};
-
-const drawBoxSurface = (corners: Float32Array, mesh: THREE.Mesh) => {
-  const geo = mesh.geometry as THREE.BufferGeometry;
-  const attr = geo.getAttribute("position") as THREE.BufferAttribute | null;
-  if (!corners.length) {
-    if (attr) {
-      geo.setDrawRange(0, 0);
+    if (!attr || attr.array.length !== outline.length) {
+      geo.setAttribute("position", new THREE.BufferAttribute(outline.slice() as any, 3));
+    } else {
+      (attr.array as Float32Array).set(outline);
+      attr.needsUpdate = true;
     }
-    return;
-  }
+    const updated = geo.getAttribute("position") as THREE.BufferAttribute;
+    updated.needsUpdate = true;
+    geo.setDrawRange(0, outline.length / 3);
+    geo.computeBoundingSphere();
+  };
 
-  const desired = corners.length;
-  if (!attr || attr.array.length !== desired) {
-    const updated = corners.slice() as Float32Array;
-    for (let i = 2; i < updated.length; i += 3) {
-      updated[i] = -0.02;
+  const drawBoxSurface = (corners: Float32Array, mesh: THREE.Mesh) => {
+    const geo = mesh.geometry as THREE.BufferGeometry;
+    const attr = geo.getAttribute("position") as THREE.BufferAttribute | null;
+    if (!corners.length) {
+      if (attr) geo.setDrawRange(0, 0);
+      return;
     }
-    geo.setAttribute("position", new THREE.BufferAttribute(updated, 3));
-  } else {
-    const arr = attr.array as Float32Array;
-    arr.set(corners);
-    for (let i = 2; i < arr.length; i += 3) {
-      arr[i] = -0.02;
+    const desired = corners.length;
+    if (!attr || attr.array.length !== desired) {
+      const updated = corners.slice() as Float32Array;
+      for (let i = 2; i < updated.length; i += 3) updated[i] = -0.02;
+      geo.setAttribute("position", new THREE.BufferAttribute(updated, 3));
+    } else {
+      const arr = attr.array as Float32Array;
+      arr.set(corners);
+      for (let i = 2; i < arr.length; i += 3) arr[i] = -0.02;
+      attr.needsUpdate = true;
     }
-    attr.needsUpdate = true;
-  }
-
-  geo.setDrawRange(0, 6);
-  geo.computeVertexNormals();
-  geo.computeBoundingSphere();
-};
+    geo.setDrawRange(0, 6);
+    geo.computeVertexNormals();
+    geo.computeBoundingSphere();
+  };
 
   useEffect(() => {
     updateScrubberUi();
   }, [updateScrubberUi]);
 
   useEffect(() => {
-    if (!three.current || !running || !isOpen) return;
+    if (!running || !isOpen) return;
+    resetViewerState();
+  }, [running, isOpen, resetViewerState]);
 
-    frames.current = [];
-    frameIdx.current = 0;
-    followLive.current = true;
-    updateScrubberUi();
+  const handleStep = useCallback((stepFrame: StepFrame) => {
+    if (!isOpenRef.current || (!three.current && !canvas2d.current)) return;
+    if (stepFrame.step === lastStep.current) return;
+    lastStep.current = stepFrame.step;
+    if (!stepFrame.positions.length) return;
 
-    let active = true;
+    if (three.current && !hasFramedView.current) {
+      fitCameraToPositions(stepFrame.positions);
+      hasFramedView.current = true;
+    }
 
-    const tick = () => {
-      if (!active) return;
+    const bondsView: BondsView = {
+      count: stepFrame.bondCount,
+      p1: stepFrame.p1,
+      p2: stepFrame.p2,
+    };
+    const bondsPacked = stepFrame.bondCount ? packBonds(bondsView) : new Float32Array(0);
+    const boxCorners = buildBoxCorners(stepFrame.matrix, stepFrame.origin);
+    const boxOutline = boxCorners.length ? Float32Array.from(boxCorners) : new Float32Array(0);
+    const boxSurface = boxCorners.length ? Float32Array.from(boxCorners) : new Float32Array(0);
 
-      runFrames(5);
-
-      const posSnap = readPositions();
-      if (posSnap && posSnap.count) {
-        const bondsSnap = readBonds();
-        const boxSnap = readBox();
-        const posCopy = Float32Array.from(posSnap.positions);
-        const bondsPacked = bondsSnap.count ? packBonds(bondsSnap) : new Float32Array(0);
-        const boxCorners = buildBoxCorners(boxSnap.matrix, boxSnap.origin);
-        const boxOutline = boxCorners.length ? Float32Array.from(boxCorners) : new Float32Array(0);
-        const boxSurface = boxCorners.length ? Float32Array.from(boxCorners) : new Float32Array(0);
-
-        if (!scrubbing.current) {
-          drawAtoms(posCopy);
-          drawBondsPacked(bondsPacked, bondsSnap.count);
-          if (three.current) {
-            drawBoxOutline(boxOutline, three.current.boxOutline);
-            drawBoxSurface(boxSurface, three.current.boxSurface);
-          }
-        }
-
-        frames.current.push({
-          pos: posCopy,
-          bondsPacked,
-          bondCount: bondsSnap.count,
-          boxOutline,
-          boxSurface,
-        });
-        if (followLive.current && !scrubbing.current) {
-          frameIdx.current = frames.current.length - 1;
-        }
-        updateScrubberUi();
+    if (!scrubbing.current) {
+      if (three.current) {
+        drawAtoms(stepFrame.positions);
+        drawBondsPacked(bondsPacked, stepFrame.bondCount);
+        drawBoxOutline(boxOutline, three.current.boxOutline);
+        drawBoxSurface(boxSurface, three.current.boxSurface);
+      } else {
+        drawFallback2D(stepFrame.positions, bondsPacked, stepFrame.bondCount, boxOutline);
       }
+    }
 
-      rafTick.current = requestAnimationFrame(tick);
-    };
+    frames.current.push({
+      pos: stepFrame.positions,
+      bondsPacked,
+      bondCount: stepFrame.bondCount,
+      boxOutline,
+      boxSurface,
+    });
 
-    rafTick.current = requestAnimationFrame(tick);
-    return () => {
-      active = false;
-      if (rafTick.current) cancelAnimationFrame(rafTick.current);
-    };
-  }, [running, readPositions, readBonds, runFrames, isOpen, updateScrubberUi]);
+    if (followLive.current && !scrubbing.current) {
+      frameIdx.current = frames.current.length - 1;
+    }
+    updateScrubberUi();
+  }, [updateScrubberUi]);
 
-  const onScrubStart = () => { scrubbing.current = true; followLive.current = false; };
-  const onScrubEnd = () => { scrubbing.current = false; };
+  useEffect(() => {
+    setOnStep(handleStep);
+    return () => setOnStep(null);
+  }, [handleStep, setOnStep]);
+
+  const onScrubStart = () => {
+    scrubbing.current = true;
+    followLive.current = false;
+  };
+
+  const onScrubEnd = () => {
+    scrubbing.current = false;
+  };
 
   const drawFrameIdx = useCallback((idx: number) => {
-    if (!three.current || !frames.current.length) return;
+    if ((!three.current && !canvas2d.current) || !frames.current.length) return;
     const clamped = Math.max(0, Math.min(idx, frames.current.length - 1));
     frameIdx.current = clamped;
     const f = frames.current[clamped];
-    drawAtoms(f.pos);
-    drawBondsPacked(f.bondsPacked, f.bondCount);
     if (three.current) {
+      drawAtoms(f.pos);
+      drawBondsPacked(f.bondsPacked, f.bondCount);
       drawBoxOutline(f.boxOutline, three.current.boxOutline);
       drawBoxSurface(f.boxSurface, three.current.boxSurface);
+    } else {
+      drawFallback2D(f.pos, f.bondsPacked, f.bondCount, f.boxOutline);
     }
     updateScrubberUi();
   }, [updateScrubberUi]);
-  
+
   return (
     <div className="border rounded p-3 flex flex-col gap-2 bg-white">
       <div className="flex items-center gap-3">
