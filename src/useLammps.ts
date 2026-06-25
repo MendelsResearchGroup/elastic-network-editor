@@ -264,7 +264,7 @@ export function useLammps(
 
           await sleep(0);
         },
-        { every: 1, fixId: "jsasync", copy: false }
+        { every: 10, fixId: "jsasync", copy: false }
       ).catch((err) => {
         if (runSeqRef.current === runSeq && !stopRequestedRef.current) {
           console.error("Failed to start LAMMPS", err);

@@ -6,6 +6,7 @@ import CanvasView from "./CanvasView";
 import { useGraph } from "./useGraph";
 import Simulation from "./Simulation";
 import { BaseButton } from "./BaseButton";
+import { copyText } from "./clipboard";
 
 const SIMULATION_SCRIPTS = [
   {
@@ -76,9 +77,43 @@ function BondTable({
 }
 
 function LammpsPreview({ text }: { text: string }) {
+  const [copyStatus, setCopyStatus] = useState<"idle" | "copied" | "failed">(
+    "idle"
+  );
+
+  const handleCopy = async () => {
+    try {
+      await copyText(text);
+      setCopyStatus("copied");
+    } catch {
+      setCopyStatus("failed");
+    }
+  };
+
   return (
     <div className="rounded-2xl border p-3 h-[320px] flex flex-col">
-      <div className="font-semibold mb-2">LAMMPS data preview</div>
+      <div className="flex items-center justify-between gap-3 mb-2">
+        <div className="font-semibold">LAMMPS data preview</div>
+        <div className="flex items-center gap-2">
+          {copyStatus !== "idle" && (
+            <span
+              className={`text-xs ${
+                copyStatus === "copied" ? "text-emerald-700" : "text-rose-700"
+              }`}
+            >
+              {copyStatus === "copied" ? "Copied" : "Copy failed"}
+            </span>
+          )}
+          <BaseButton
+            variant="ghost"
+            disabled={!text}
+            onClick={handleCopy}
+            title="Copy LAMMPS data"
+          >
+            Copy
+          </BaseButton>
+        </div>
+      </div>
       <textarea
         className="flex-1 w-full resize-none font-mono text-xs border rounded p-2 bg-slate-50"
         value={text}
@@ -286,7 +321,7 @@ const SimulationWrapper = ({
         X
       </BaseButton>
     </div>
-    <div className="p-2 h-[calc(100%-40px)] overflow-hidden">
+    <div className="p-2 h-[calc(100%-40px)] overflow-auto">
       <Simulation network={lmp} isOpen={isOpen} script={script} />
     </div>
   </div>

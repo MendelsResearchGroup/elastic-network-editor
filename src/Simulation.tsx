@@ -1,11 +1,16 @@
-import { useCallback, useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import * as THREE from "three";
 
-// @ts-ignore
+// @ts-expect-error OrbitControls does not expose declarations through this path.
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls";
 import { useLammps } from "./useLammps";
 import type { SimulationScriptSpec, StepFrame } from "./useLammps";
 import { BaseButton } from "./BaseButton";
+import {
+  boxDimensionsFromLengths,
+  calculateBoxMeasurement,
+  type BoxDimensions,
+} from "./poisson";
 
 type BondsView = { count: number; p1: Float32Array; p2: Float32Array };
 type Frame = {
@@ -14,6 +19,7 @@ type Frame = {
   bondCount: number;
   boxOutline: Float32Array;
   boxSurface: Float32Array;
+  box: BoxDimensions | null;
 };
 type Canvas2DState = {
   canvas: HTMLCanvasElement;
@@ -25,6 +31,102 @@ const BG = 0xffffff;
 const ATOM = 0x2563eb;
 const BOND = 0x334155;
 const BOX = 0x1f2937;
+
+type ChartPoint = {
+  frameIndex: number;
+  poissonRatio: number;
+};
+
+function formatMeasurement(value: number | null) {
+  return value === null ? "Unavailable" : value.toPrecision(4);
+}
+
+function PoissonChart({
+  points,
+  selectedFrame,
+}: {
+  points: ChartPoint[];
+  selectedFrame: number;
+}) {
+  const width = 560;
+  const height = 150;
+  const padX = 42;
+  const padY = 18;
+
+  if (!points.length) {
+    return (
+      <div className="h-[150px] grid place-items-center border border-slate-200 text-sm text-slate-500">
+        Poisson ratio becomes available after horizontal strain develops.
+      </div>
+    );
+  }
+
+  const minFrame = points[0].frameIndex;
+  const maxFrame = points[points.length - 1].frameIndex;
+  const ratios = points.map((point) => point.poissonRatio);
+  const minRatio = Math.min(...ratios);
+  const maxRatio = Math.max(...ratios);
+  const frameRange = Math.max(1, maxFrame - minFrame);
+  const ratioRange = Math.max(1e-9, maxRatio - minRatio);
+  const x = (frameIndex: number) =>
+    padX + ((frameIndex - minFrame) / frameRange) * (width - 2 * padX);
+  const y = (ratio: number) =>
+    height - padY - ((ratio - minRatio) / ratioRange) * (height - 2 * padY);
+  const path = points
+    .map(
+      (point, index) =>
+        `${index === 0 ? "M" : "L"} ${x(point.frameIndex)} ${y(
+          point.poissonRatio
+        )}`
+    )
+    .join(" ");
+
+  return (
+    <svg
+      viewBox={`0 0 ${width} ${height}`}
+      className="w-full h-[150px] border border-slate-200 bg-white"
+      role="img"
+      aria-label="Poisson ratio by simulation frame"
+    >
+      <line
+        x1={padX}
+        y1={height - padY}
+        x2={width - padX}
+        y2={height - padY}
+        stroke="#cbd5e1"
+      />
+      <line
+        x1={padX}
+        y1={padY}
+        x2={padX}
+        y2={height - padY}
+        stroke="#cbd5e1"
+      />
+      <path d={path} fill="none" stroke="#0f766e" strokeWidth="2" />
+      {points.map((point) => {
+        const selected = point.frameIndex === selectedFrame;
+        return (
+          <circle
+            key={point.frameIndex}
+            cx={x(point.frameIndex)}
+            cy={y(point.poissonRatio)}
+            r={selected ? 5 : 2.5}
+            fill={selected ? "#dc2626" : "#0f766e"}
+          />
+        );
+      })}
+      <text x={width / 2} y={height - 3} textAnchor="middle" fontSize="10">
+        Frame
+      </text>
+      <text x={4} y={12} fontSize="10">
+        {maxRatio.toPrecision(4)}
+      </text>
+      <text x={4} y={height - padY} fontSize="10">
+        {minRatio.toPrecision(4)}
+      </text>
+    </svg>
+  );
+}
 
 export default function Simulation({
   network,
@@ -67,6 +169,8 @@ export default function Simulation({
 
   const frames = useRef<Frame[]>([]);
   const frameIdx = useRef(0);
+  const [frameCount, setFrameCount] = useState(0);
+  const [selectedFrame, setSelectedFrame] = useState(0);
   const frameInputRef = useRef<HTMLInputElement>(null);
   const frameLabelRef = useRef<HTMLSpanElement>(null);
   const prevScriptId = useRef(script.id);
@@ -97,6 +201,8 @@ export default function Simulation({
   const resetViewerState = useCallback(() => {
     frames.current = [];
     frameIdx.current = 0;
+    setFrameCount(0);
+    setSelectedFrame(0);
     followLive.current = true;
     scrubbing.current = false;
     lastStep.current = -1;
@@ -355,7 +461,7 @@ export default function Simulation({
     const geo = bonds.geometry as THREE.BufferGeometry;
     const attr = geo.getAttribute("position") as THREE.BufferAttribute | null;
     if (!attr || attr.array.length !== packed.length) {
-      geo.setAttribute("position", new THREE.BufferAttribute(packed.slice() as any, 3));
+      geo.setAttribute("position", new THREE.BufferAttribute(packed.slice(), 3));
     } else {
       (attr.array as Float32Array).set(packed);
       (geo.getAttribute("position") as THREE.BufferAttribute).needsUpdate = true;
@@ -478,7 +584,7 @@ export default function Simulation({
       return;
     }
     if (!attr || attr.array.length !== outline.length) {
-      geo.setAttribute("position", new THREE.BufferAttribute(outline.slice() as any, 3));
+      geo.setAttribute("position", new THREE.BufferAttribute(outline.slice(), 3));
     } else {
       (attr.array as Float32Array).set(outline);
       attr.needsUpdate = true;
@@ -559,11 +665,14 @@ export default function Simulation({
       bondCount: stepFrame.bondCount,
       boxOutline,
       boxSurface,
+      box: boxDimensionsFromLengths(stepFrame.lengths),
     });
 
     if (followLive.current && !scrubbing.current) {
       frameIdx.current = frames.current.length - 1;
+      setSelectedFrame(frameIdx.current);
     }
+    setFrameCount(frames.current.length);
     updateScrubberUi();
   }, [updateScrubberUi]);
 
@@ -585,6 +694,7 @@ export default function Simulation({
     if ((!three.current && !canvas2d.current) || !frames.current.length) return;
     const clamped = Math.max(0, Math.min(idx, frames.current.length - 1));
     frameIdx.current = clamped;
+    setSelectedFrame(clamped);
     const f = frames.current[clamped];
     if (three.current) {
       drawAtoms(f.pos);
@@ -597,8 +707,27 @@ export default function Simulation({
     updateScrubberUi();
   }, [updateScrubberUi]);
 
+  const visibleFrames = frames.current.slice(0, frameCount);
+  const referenceBox =
+    visibleFrames.find((frame) => frame.box)?.box ?? null;
+  const selectedBox = visibleFrames[selectedFrame]?.box ?? null;
+  const selectedMeasurement =
+    referenceBox && selectedBox
+      ? calculateBoxMeasurement(referenceBox, selectedBox)
+      : null;
+  const chartPoints: ChartPoint[] =
+    !referenceBox
+      ? []
+      : visibleFrames.flatMap((frame, index) => {
+          if (!frame.box) return [];
+          const measurement = calculateBoxMeasurement(referenceBox, frame.box);
+          return measurement?.poissonRatio === null || !measurement
+            ? []
+            : [{ frameIndex: index, poissonRatio: measurement.poissonRatio }];
+        });
+
   return (
-    <div className="border rounded p-3 flex flex-col gap-2 bg-white">
+    <div className="border rounded p-3 flex flex-col gap-3 bg-white">
       <div className="flex items-center gap-3">
         <BaseButton
           variant="primary"
@@ -634,7 +763,62 @@ export default function Simulation({
         <span ref={frameLabelRef} className="text-xs w-16 text-right tabular-nums">—</span>
       </div>
 
-      <div ref={host} className="w-full aspect-square" />
+      <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_320px] gap-3 min-h-0">
+        <div ref={host} className="w-full aspect-square" />
+
+        <div className="flex flex-col gap-3 min-w-0">
+          <section className="border border-slate-200 p-3">
+            <h3 className="text-sm font-semibold mb-2">Box analysis</h3>
+            {selectedBox ? (
+              <dl className="grid grid-cols-2 gap-x-4 gap-y-1 text-sm">
+                <dt className="text-slate-500">Width</dt>
+                <dd className="text-right font-mono">
+                  {selectedBox.width.toPrecision(4)}
+                </dd>
+                <dt className="text-slate-500">Height</dt>
+                <dd className="text-right font-mono">
+                  {selectedBox.height.toPrecision(4)}
+                </dd>
+                <dt className="text-slate-500">Axial strain</dt>
+                <dd className="text-right font-mono">
+                  {selectedMeasurement
+                    ? selectedMeasurement.axialStrain.toPrecision(4)
+                    : "Unavailable"}
+                </dd>
+                <dt className="text-slate-500">Transverse strain</dt>
+                <dd className="text-right font-mono">
+                  {selectedMeasurement
+                    ? selectedMeasurement.transverseStrain.toPrecision(4)
+                    : "Unavailable"}
+                </dd>
+                <dt className="text-slate-500">Poisson ratio</dt>
+                <dd className="text-right font-mono font-semibold">
+                  {formatMeasurement(
+                    selectedMeasurement?.poissonRatio ?? null
+                  )}
+                </dd>
+              </dl>
+            ) : (
+              <p className="text-sm text-slate-500">
+                Box measurements are not available for this frame.
+              </p>
+            )}
+          </section>
+
+          <section className="border border-slate-200 p-3">
+            <div className="flex items-center justify-between gap-3 mb-2">
+              <h3 className="text-sm font-semibold">Poisson ratio</h3>
+              <span className="text-xs text-slate-500">
+                Frame {frameCount ? selectedFrame + 1 : 0}
+              </span>
+            </div>
+            <PoissonChart
+              points={chartPoints}
+              selectedFrame={selectedFrame}
+            />
+          </section>
+        </div>
+      </div>
     </div>
   );
 }

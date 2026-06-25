@@ -2,6 +2,7 @@
 variable dt equal 0.01
 variable strain equal 0.03
 variable srate equal 1e-05
+variable targetTemp equal 1e-7
 variable M equal 1000 # averaging time for properties
 variable strainsteps equal ${strain}/${dt}/${srate}
 
@@ -31,8 +32,8 @@ variable nsteps equal round(${strainsteps})
 #fix             4 all nve
 #fix		     6 all press/berendsen y  0.0 0.0 1 x 0.0 0.0 10
 #fix             6 all npt temp 0.0001 0.0001 1000.0 y 0.0 0.0 1000.0
-fix             5 all langevin 0.02 0.02 5.0 904297
-fix             6 all nph y 0.0 0.0 200.0 ptemp 0.02
+fix             5 all langevin ${targetTemp} ${targetTemp} 5.0 904297
+fix             6 all nph y 0.0 0.0 200.0 ptemp ${targetTemp}
 fix     	     9 all deform 1 x erate -${srate} units box remap x
 
 # For PLUMED2
