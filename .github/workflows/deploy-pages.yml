@@ -39,6 +39,7 @@ jobs:
         run: |
           npm run lint
           npm test
+          node examples/negative-thermal-expansion/reproduce.mjs
       - name: Build
         run: npm run build
 

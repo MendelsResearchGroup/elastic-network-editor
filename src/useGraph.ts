@@ -23,9 +23,9 @@ function loadFromStorage(): (Partial<Graph> & { selected?: number | null; zoomPe
 
 export function useGraph(initial?: Graph) {
   const initialGraph: Graph = (() => {
+    if (initial) return initial;
     const saved = loadFromStorage();
     if (saved?.atoms && saved?.bonds) return { atoms: saved.atoms, bonds: saved.bonds, model: saved.model };
-    if (initial) return deepClone(initial);
     return {
       atoms: [
         { id: 1, x: -1.0, y: 0.0 },
@@ -87,7 +87,7 @@ export function useGraph(initial?: Graph) {
   const [past, setPast] = useState<Graph[]>([]);
   const [future, setFuture] = useState<Graph[]>([]);
 
-  const saved = loadFromStorage();
+  const saved = initial ? null : loadFromStorage();
   const [selected, setSelected] = useState<number | null>(saved?.selected ?? null);
   const [zoomPercent, setZoomPercent] = useState<number>(saved?.zoomPercent ?? 100);
 
@@ -223,6 +223,7 @@ export function useGraph(initial?: Graph) {
   }, [undo, redo]);
 
   useEffect(() => {
+    if (initial) return;
     try {
       localStorage.setItem(STORAGE_KEY, JSON.stringify({
         ...present,
@@ -230,7 +231,7 @@ export function useGraph(initial?: Graph) {
         zoomPercent,
       }));
     } catch { /* Storage may be disabled or full. */ }
-  }, [present, selected, zoomPercent]);
+  }, [initial, present, selected, zoomPercent]);
 
   const atoms = present.atoms;
   const bonds = present.bonds;

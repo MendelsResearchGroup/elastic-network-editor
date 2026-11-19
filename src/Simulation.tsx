@@ -141,7 +141,13 @@ export default function Simulation({
   autoPlay?: boolean;
   script: SimulationScriptSpec;
 }) {
+  const [plateaus, setPlateaus] = useState<{ temperature: number; area: number }[]>([]);
   const logLammps = useCallback((...args: unknown[]) => {
+    const line = String(args[0]);
+    if (line.startsWith("NTE_MEAN ")) {
+      const [, , temperature, area] = line.split(/\s+/).map(Number);
+      setPlateaus(previous => [...previous, { temperature, area }]);
+    }
     console.log("[LAMMPS]", ...args);
   }, []);
 
@@ -199,6 +205,7 @@ export default function Simulation({
   }, []);
 
   const resetViewerState = useCallback(() => {
+    setPlateaus([]);
     frames.current = [];
     frameIdx.current = 0;
     setFrameCount(0);
@@ -793,6 +800,14 @@ export default function Simulation({
               </p>
             )}
           </section>
+
+          {script.id === "nte" && plateaus.length > 0 && <section className="border p-3 text-sm">
+            <h3 className="font-semibold">Time-averaged thermal response</h3>
+            {plateaus.map(({ temperature, area }, index) => <p key={index}>
+              {index === 0 ? "Cold" : "Hot"} mean area {area.toFixed(4)} at mean T {temperature.toFixed(5)} (LJ units)
+            </p>)}
+            {plateaus.length === 2 && <p>Mean area change {((plateaus[1].area / plateaus[0].area - 1) * 100).toFixed(3)}%</p>}
+          </section>}
 
           {compression && <section className="border border-slate-200 p-3">
             <div className="flex items-center justify-between gap-3 mb-2">

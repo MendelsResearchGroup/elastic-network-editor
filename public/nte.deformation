@@ -1,0 +1,29 @@
+units lj
+dimension 2
+boundary p p p
+atom_style full
+bond_style harmonic
+angle_style harmonic
+read_data network.lmp
+neighbor 0.3 nsq
+comm_modify cutoff 3
+timestep 0.004
+variable seed index 1001
+velocity all create 0.002 ${seed} mom yes rot no dist gaussian
+fix planar all enforce2d
+variable area equal lx*ly
+variable kinetic equal temp
+thermo 500
+thermo_style custom step temp lx ly press
+print "EDITOR_REFERENCE $(lx) $(ly)"
+variable target index 0.002 0.04
+label plateau
+fix ensemble all npt temp ${target} ${target} 0.4 iso 0 0 4
+run 20000
+fix mean all ave/time 10 2000 20000 v_kinetic v_area
+run 20000
+print "NTE_MEAN ${target} $(f_mean[1]:%.12g) $(f_mean[2]:%.12g)"
+unfix mean
+unfix ensemble
+next target
+jump SELF plateau

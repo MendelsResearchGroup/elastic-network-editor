@@ -2,6 +2,11 @@
 
 Elastic Network Editor is a browser-based playground for sketching elastic spring networks, exporting them as LAMMPS data files, and running quick simulations to explore metamaterial behaviors such as auxetic responses or negative thermal expansion (NTE). Everything happens locally thanks to LAMMPS compiled to WebAssembly, so iterations are fast and reproducible.
 
+## Research examples
+
+- [Rotating-square auxetic network](examples/rotating-squares/README.md)
+- [Negative thermal expansion in a square lattice](examples/negative-thermal-expansion/README.md)
+
 ## Highlights
 
 - **Interactive graph editor** – Add or remove atoms and bonds, drag selections with optional grid snapping, and edit spring constants directly on the canvas or in the data tables.

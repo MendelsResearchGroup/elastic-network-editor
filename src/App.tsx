@@ -1,14 +1,24 @@
 import { useMemo, useRef, useState } from "react";
 import { EditableList, type FieldSpec } from "./EditableList";
 import type { Atom, Bond } from "./model";
-import { generateLmp } from "./parse";
+import rotatingSquares from "../examples/rotating-squares/rotating-squares.lmp?raw";
+import thermalLattice from "../examples/negative-thermal-expansion/lattice.lmp?raw";
+import { parseLmp, generateLmp } from "./parse";
 import CanvasView from "./CanvasView";
 import { useGraph } from "./useGraph";
 import Simulation from "./Simulation";
 import { BaseButton } from "./BaseButton";
 import { copyText } from "./clipboard";
 
+const examples = [
+  { id: "rotating-squares", name: "Rotating squares", input: rotatingSquares, script: "auxetic-compress" },
+  { id: "negative-thermal-expansion", name: "Negative thermal expansion", input: thermalLattice, script: "nte" },
+] as const;
+const example = examples.find(item => item.id === new URLSearchParams(location.search).get("example"));
+const exampleGraph = example && parseLmp(example.input);
+
 const SIMULATION_SCRIPTS = [
+  { id: "nte", label: "Cold and hot plateaus", path: "/nte.deformation" },
   {
     id: "thermal-expand",
     label: "Thermal Expansion",
@@ -144,12 +154,12 @@ export default function App() {
     addBondBetween,
     loadFromString,
     appendSelection,
-  } = useGraph();
+  } = useGraph(exampleGraph);
 
-  const [zoomPercent, setZoomPercent] = useState(200);
-  const [showSim, setShowSim] = useState(false);
+  const [zoomPercent, setZoomPercent] = useState(example ? 100 : 200);
+  const [showSim, setShowSim] = useState(Boolean(example));
   const [simulationScriptId, setSimulationScriptId] =
-    useState<typeof SIMULATION_SCRIPTS[number]["id"]>("auxetic-compress");
+    useState<typeof SIMULATION_SCRIPTS[number]["id"]>(example?.script ?? "auxetic-compress");
   const scale = zoomPercent / 100;
 
   const lmp = useMemo(() => generateLmp(atoms, bonds, model), [atoms, bonds, model]);
@@ -178,7 +188,10 @@ export default function App() {
 
   return (
     <div className="w-full h-full grid grid-rows-[auto_1fr] bg-white text-slate-900">
-      <div className="flex items-center gap-2 p-3 border-b sticky top-0 bg-white z-10">
+      <div className="flex flex-wrap items-center gap-2 p-3 border-b sticky top-0 bg-white z-10">
+        <nav aria-label="Network examples" className="flex gap-3 text-sm">
+          {examples.map(item => <a key={item.id} className="underline" href={`?example=${item.id}`} target="_blank" rel="noreferrer">{item.name}</a>)}
+        </nav>
         <div className="flex gap-2">
           <BaseButton variant="ghost" disabled={!canUndo} onClick={undo}>
             Undo

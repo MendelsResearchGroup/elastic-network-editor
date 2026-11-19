@@ -98,7 +98,7 @@ export function useLammps(onPrint: (...args: unknown[]) => void, network: string
       }
       if (active.current !== run) return;
       client.writeFile("network.lmp", network);
-      const thermal = script.id === "thermal-expand";
+      const thermal = script.id !== "auxetic-compress";
       await client.runScriptAsync(body, async (data: WorkerStepData) => {
         // The worker acknowledges this frame only when the callback returns.
         await run.gate.wait();
@@ -109,7 +109,7 @@ export function useLammps(onPrint: (...args: unknown[]) => void, network: string
           bondCount: data.bonds?.count ?? 0, matrix: data.box.matrix, origin: data.box.origin,
           lengths: data.box.lengths, reference, temperature: data.computeScalars?.thermo_temp ?? null,
         });
-      }, { every: 10, computeScalars: thermal ? ["thermo_temp"] : [] });
+      }, { every: script.id === "nte" ? 500 : 10, computeScalars: thermal ? ["thermo_temp"] : [] });
       if (!reference) throw new Error("The simulation did not report its reference cell.");
     } catch (err) {
       if (active.current === run) setError(err instanceof Error ? err.message : String(err));
