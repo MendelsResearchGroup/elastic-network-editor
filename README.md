@@ -14,7 +14,7 @@ Elastic Network Editor is a browser-based playground for sketching elastic sprin
 
 Prerequisites:
 
-- Node.js 18+ (Node 20 recommended)
+- Node.js 22.18+ (includes TypeScript support for the test suite)
 - npm 9+
 
 Install dependencies and start the dev server:
@@ -36,22 +36,23 @@ Visit the printed local address (normally `http://localhost:5173`). The app also
 
 2. **Import existing geometries**
    - Choose _Load .lmp_ and pick a LAMMPS data file (see `public/minimal_network.lmp` for the expected format).
-   - The parser keeps atom IDs and bond stiffness values, so you can continue editing immediately.
+   - The editor accepts 2D `Atoms # full` networks with harmonic bonds and angles. It retains the periodic cell, masses, atom IDs, equilibrium lengths, angular interactions, and supplied velocities. Unsupported sections or styles produce an import error.
 
 3. **Export to LAMMPS**
    - The current network is always mirrored in the _LAMMPS data preview_. Copy the text into your own workflow or save it to disk.
-   - Bonds automatically generate angle definitions and reference bond lengths; z positions remain flat so you can simulate 2D sheets with out-of-plane perturbations.
+   - For drawings, each spring takes its rest length from its endpoints and each pair of neighboring bonds creates an angle. Imported models keep their specified angles and spring rest lengths when you move atoms.
 
 4. **Run a simulation**
    - Pick a scenario from the _Script_ dropdown and hit _Simulate_.
    - The WebAssembly LAMMPS engine (`lammps.js`) runs in the background; you can pause, resume, scrub through frames, or follow the live stream of timesteps.
+   - Compression measures strain relative to the relaxed cell before loading. Heating shows the instantaneous temperature, area and percentage area change from the initial cell. A free-standing network can leave most of a zero-pressure cell empty. Interpreting cell strains as material strains requires a network that transmits load across the periodic boundaries.
    - Additional script assets (e.g., potentials, macros) are loaded from `public/` and mirrored into the LAMMPS virtual filesystem before each run.
 
 ## Extending Simulations
 
 - Scripts live alongside the app in `public/*.deformation` (see `public/thermal-expand.deformation`).
 - Scenario-specific assets belong in subdirectories (e.g., `public/auxetic/`) and are listed in `SIMULATION_SCRIPTS` inside `src/App.tsx`.
-- Each script is wrapped in an auto-generated `in.lmp` that disables default logging for cleaner output. Modify `src/useLammps.ts` if you need different bootstrapping behavior.
+- The scenarios print `EDITOR_REFERENCE $(lx:%.17g) $(ly:%.17g)` immediately before loading or heating. Analysis starts when that reference cell is available.
 
 ## Tech Stack
 

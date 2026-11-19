@@ -20,6 +20,8 @@ type Frame = {
   boxOutline: Float32Array;
   boxSurface: Float32Array;
   box: BoxDimensions | null;
+  reference: BoxDimensions;
+  temperature: number | null;
 };
 type Canvas2DState = {
   canvas: HTMLCanvasElement;
@@ -143,7 +145,7 @@ export default function Simulation({
     console.log("[LAMMPS]", ...args);
   }, []);
 
-  const { ready, running, start, stop, reset, setNetwork, setOnStep } =
+  const { status, start, stop, reset, error, setOnStep } =
     useLammps(logLammps, network, script);
 
   const host = useRef<HTMLDivElement>(null);
@@ -162,7 +164,6 @@ export default function Simulation({
   const rafRender = useRef<number>(0);
   const scrubbing = useRef(false);
   const followLive = useRef(true);
-  const autoResumeRef = useRef(autoPlay);
   const lastStep = useRef<number>(-1);
   const isOpenRef = useRef(isOpen);
   const hasFramedView = useRef(false);
@@ -173,7 +174,6 @@ export default function Simulation({
   const [selectedFrame, setSelectedFrame] = useState(0);
   const frameInputRef = useRef<HTMLInputElement>(null);
   const frameLabelRef = useRef<HTMLSpanElement>(null);
-  const prevScriptId = useRef(script.id);
 
   const updateScrubberUi = useCallback(() => {
     if (frameInputRef.current) {
@@ -215,37 +215,14 @@ export default function Simulation({
   }, [clearRenderedFrame, updateScrubberUi]);
 
   const handleRun = useCallback(() => {
-    autoResumeRef.current = true;
-    start();
-  }, [start]);
+    if (status === "idle") resetViewerState();
+    void start();
+  }, [start, status, resetViewerState]);
 
-  const handlePause = useCallback(() => {
-    autoResumeRef.current = false;
-    stop();
-  }, [stop]);
-
-  useEffect(() => {
-    isOpenRef.current = isOpen;
-  }, [isOpen]);
-
-  useEffect(() => {
-    setNetwork().catch((err) => {
-      console.error("Failed to sync network with LAMMPS FS", err);
-    });
-  }, [network, setNetwork]);
-
-  useEffect(() => {
-    if (prevScriptId.current === script.id) return;
-    prevScriptId.current = script.id;
-    resetViewerState();
-    autoResumeRef.current = autoPlay;
-    reset();
-    if (autoResumeRef.current && isOpen) start();
-  }, [script.id, autoPlay, isOpen, reset, resetViewerState, start]);
+  useEffect(() => { isOpenRef.current = isOpen; }, [isOpen]);
 
   useEffect(() => {
     if (!isOpen) {
-      stop();
       return;
     }
 
@@ -384,9 +361,11 @@ export default function Simulation({
     window.addEventListener("resize", onResize);
     onResize();
 
-    if (autoResumeRef.current && autoPlay) start();
+    resetViewerState();
+    if (autoPlay) void start();
 
     return () => {
+      reset();
       if (rafRender.current) cancelAnimationFrame(rafRender.current);
       window.removeEventListener("resize", onResize);
       if (three.current) {
@@ -408,7 +387,7 @@ export default function Simulation({
         canvas2d.current = null;
       }
     };
-  }, [autoPlay, isOpen, start, stop]);
+  }, [autoPlay, isOpen, start, reset, resetViewerState]);
 
   const drawAtoms = (pos: Float32Array) => {
     if (!three.current) return;
@@ -622,10 +601,6 @@ export default function Simulation({
     updateScrubberUi();
   }, [updateScrubberUi]);
 
-  useEffect(() => {
-    if (!running || !isOpen) return;
-    resetViewerState();
-  }, [running, isOpen, resetViewerState]);
 
   const handleStep = useCallback((stepFrame: StepFrame) => {
     if (!isOpenRef.current || (!three.current && !canvas2d.current)) return;
@@ -666,6 +641,7 @@ export default function Simulation({
       boxOutline,
       boxSurface,
       box: boxDimensionsFromLengths(stepFrame.lengths),
+      reference: stepFrame.reference, temperature: stepFrame.temperature,
     });
 
     if (followLive.current && !scrubbing.current) {
@@ -708,15 +684,15 @@ export default function Simulation({
   }, [updateScrubberUi]);
 
   const visibleFrames = frames.current.slice(0, frameCount);
-  const referenceBox =
-    visibleFrames.find((frame) => frame.box)?.box ?? null;
+  const compression = script.id === "auxetic-compress";
+  const referenceBox = visibleFrames[selectedFrame]?.reference;
   const selectedBox = visibleFrames[selectedFrame]?.box ?? null;
   const selectedMeasurement =
     referenceBox && selectedBox
       ? calculateBoxMeasurement(referenceBox, selectedBox)
       : null;
   const chartPoints: ChartPoint[] =
-    !referenceBox
+    !compression || !referenceBox
       ? []
       : visibleFrames.flatMap((frame, index) => {
           if (!frame.box) return [];
@@ -731,18 +707,18 @@ export default function Simulation({
       <div className="flex items-center gap-3">
         <BaseButton
           variant="primary"
-          disabled={!ready || running}
+          disabled={status === "running"}
           onClick={handleRun}
-          title={ready ? "Run simulation" : "Initializing..."}
+          title={status === "paused" ? "Resume simulation" : "Run simulation"}
         >
-          Run
+          {status === "paused" ? "Resume" : "Run"}
         </BaseButton>
 
         <BaseButton
           variant="ghost"
-          disabled={!running}
-          onClick={handlePause}
-          title={running ? "Stop simulation" : "Not running"}
+          disabled={status !== "running"}
+          onClick={stop}
+          title="Pause simulation"
         >
           Pause
         </BaseButton>
@@ -763,12 +739,14 @@ export default function Simulation({
         <span ref={frameLabelRef} className="text-xs w-16 text-right tabular-nums">—</span>
       </div>
 
+      {error && <p role="alert">{error}</p>}
       <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_320px] gap-3 min-h-0">
         <div ref={host} className="w-full aspect-square" />
 
         <div className="flex flex-col gap-3 min-w-0">
           <section className="border border-slate-200 p-3">
             <h3 className="text-sm font-semibold mb-2">Box analysis</h3>
+            <p className="text-sm text-slate-600 mb-2">Interpreting cell strain as material strain requires a network that transmits load across the periodic boundaries.</p>
             {selectedBox ? (
               <dl className="grid grid-cols-2 gap-x-4 gap-y-1 text-sm">
                 <dt className="text-slate-500">Width</dt>
@@ -779,24 +757,35 @@ export default function Simulation({
                 <dd className="text-right font-mono">
                   {selectedBox.height.toPrecision(4)}
                 </dd>
-                <dt className="text-slate-500">Axial strain</dt>
-                <dd className="text-right font-mono">
-                  {selectedMeasurement
-                    ? selectedMeasurement.axialStrain.toPrecision(4)
-                    : "Unavailable"}
-                </dd>
-                <dt className="text-slate-500">Transverse strain</dt>
-                <dd className="text-right font-mono">
-                  {selectedMeasurement
-                    ? selectedMeasurement.transverseStrain.toPrecision(4)
-                    : "Unavailable"}
-                </dd>
-                <dt className="text-slate-500">Poisson ratio</dt>
-                <dd className="text-right font-mono font-semibold">
-                  {formatMeasurement(
-                    selectedMeasurement?.poissonRatio ?? null
-                  )}
-                </dd>
+                {compression ? <>
+                  <dt className="text-slate-500">Axial strain</dt>
+                  <dd className="text-right font-mono">
+                    {selectedMeasurement
+                      ? selectedMeasurement.axialStrain.toPrecision(4)
+                      : "Unavailable"}
+                  </dd>
+                  <dt className="text-slate-500">Transverse strain</dt>
+                  <dd className="text-right font-mono">
+                    {selectedMeasurement
+                      ? selectedMeasurement.transverseStrain.toPrecision(4)
+                      : "Unavailable"}
+                  </dd>
+                  <dt className="text-slate-500">Poisson ratio</dt>
+                  <dd className="text-right font-mono font-semibold">
+                    {formatMeasurement(
+                      selectedMeasurement?.poissonRatio ?? null
+                    )}
+                  </dd>
+                </> : <>
+                  <dt>Temperature (LJ units)</dt>
+                  <dd className="text-right font-mono">{formatMeasurement(visibleFrames[selectedFrame]?.temperature ?? null)}</dd>
+                  <dt>Cell area (LJ units²)</dt>
+                  <dd className="text-right font-mono">{formatMeasurement(selectedBox.width * selectedBox.height)}</dd>
+                  <dt>Cell area change</dt>
+                  <dd className="text-right font-mono">{referenceBox && (
+                    (100 * (selectedBox.width * selectedBox.height / (referenceBox.width * referenceBox.height) - 1)).toPrecision(4) + "%"
+                  )}</dd>
+                </>}
               </dl>
             ) : (
               <p className="text-sm text-slate-500">
@@ -805,7 +794,7 @@ export default function Simulation({
             )}
           </section>
 
-          <section className="border border-slate-200 p-3">
+          {compression && <section className="border border-slate-200 p-3">
             <div className="flex items-center justify-between gap-3 mb-2">
               <h3 className="text-sm font-semibold">Poisson ratio</h3>
               <span className="text-xs text-slate-500">
@@ -816,7 +805,7 @@ export default function Simulation({
               points={chartPoints}
               selectedFrame={selectedFrame}
             />
-          </section>
+          </section>}
         </div>
       </div>
     </div>

@@ -36,7 +36,7 @@ export function EditableList<T extends { id: number }>({
   const getDisplay = (row: T, k: keyof T) => {
     const kf = keyFor(row.id, k);
     if (kf in drafts) return drafts[kf];
-    const v = (row as any)[k];
+    const v = row[k];
     return v === undefined || v === null ? "" : String(v);
   };
 
@@ -68,14 +68,14 @@ export function EditableList<T extends { id: number }>({
       return;
     }
     const next = [...rows];
-    next[rowIdx] = { ...(next[rowIdx] as any), [k]: v };
+    next[rowIdx] = { ...next[rowIdx], [k]: v };
     onChange(next);
     clearDraft(next[rowIdx].id, k);
   };
 
   const commitText = (rowIdx: number, k: keyof T, s: string) => {
     const next = [...rows];
-    next[rowIdx] = { ...(next[rowIdx] as any), [k]: s };
+    next[rowIdx] = { ...next[rowIdx], [k]: s };
     onChange(next);
     clearDraft(next[rowIdx].id, k);
   };

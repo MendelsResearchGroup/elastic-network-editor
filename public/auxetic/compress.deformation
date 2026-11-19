@@ -21,6 +21,8 @@ minimize ${etol} ${ftol} ${maxiter} ${maxeval}
 thermo 100
 # thermo_style custom step atoms temp press c_vx c_vy c_vz
 unfix 3
+# Record the equilibrium cell before applying the axial strain.
+print "EDITOR_REFERENCE $(lx:%.17g) $(ly:%.17g)"
 fix 2d all enforce2d
 
 

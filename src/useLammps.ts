@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { LammpsClient } from "lammps.js/client";
+import type { LammpsWorkerClient, WorkerStepData } from "lammps.js/client";
+import { boxDimensionsFromLengths, type BoxDimensions } from "./poisson";
+import { FrameGate } from "./frameGate";
 
 type ScriptAsset = { path: string; target?: string };
 export type SimulationScriptSpec = { id: string; label: string; path: string; assets?: ReadonlyArray<ScriptAsset> };
@@ -12,286 +14,112 @@ export type StepFrame = {
   matrix: Float32Array;
   origin: Float32Array;
   lengths: Float32Array;
+  reference: BoxDimensions;
+  temperature: number | null;
 };
 
-export function useLammps(
-  onPrint: (...args: unknown[]) => void,
-  network: string,
-  script: SimulationScriptSpec
-) {
-  const [ready, setReady] = useState(false);
-  const [running, setRunning] = useState(false);
-  const clientRef = useRef<LammpsClient | null>(null);
-  const scriptRef = useRef<SimulationScriptSpec>(script);
-  const runSeqRef = useRef(0);
-  const stopRequestedRef = useRef(false);
-  const onStepRef = useRef<((frame: StepFrame) => void) | null>(null);
-  const pendingFrameRef = useRef<StepFrame | null>(null);
-  const delayTimerRef = useRef<number | null>(null);
-  const delayResolveRef = useRef<(() => void) | null>(null);
-  const deferredStopTimerRef = useRef<number | null>(null);
+type Run = {
+  controller: AbortController;
+  client?: LammpsWorkerClient;
+  gate: FrameGate;
+};
 
-  const sleep = useCallback((ms: number) => {
-    return new Promise<void>((resolve) => {
-      delayResolveRef.current = () => {
-        delayResolveRef.current = null;
-        delayTimerRef.current = null;
-        resolve();
-      };
-      delayTimerRef.current = window.setTimeout(() => {
-        delayResolveRef.current?.();
-      }, ms);
-    });
+async function readAsset(path: string, signal: AbortSignal) {
+  const url = import.meta.env.BASE_URL + path.replace(/^\/+/, "");
+  const response = await fetch(url, { signal });
+  if (!response.ok) throw new Error(`Cannot load ${path} (HTTP ${response.status}).`);
+  return response.text();
+}
+
+export function useLammps(onPrint: (...args: unknown[]) => void, network: string, script: SimulationScriptSpec) {
+  const [status, setStatus] = useState<"idle" | "running" | "paused">("idle");
+  const [error, setError] = useState("");
+  const active = useRef<Run | null>(null);
+  const listener = useRef<((frame: StepFrame) => void) | null>(null);
+  const setOnStep = useCallback((fn: typeof listener.current) => { listener.current = fn; }, []);
+
+  const reset = useCallback(() => {
+    const run = active.current;
+    active.current = null;
+    run?.controller.abort();
+    run?.client?.dispose();
+    run?.gate.resume();
+  }, []);
+  useEffect(() => reset, [reset]);
+
+  const stop = useCallback(() => {
+    const run = active.current;
+    if (!run) return;
+    run.gate.pause();
+    setStatus("paused");
   }, []);
 
-  const cancelSleep = useCallback(() => {
-    if (delayTimerRef.current !== null) {
-      window.clearTimeout(delayTimerRef.current);
-      delayTimerRef.current = null;
-    }
-    delayResolveRef.current?.();
-    delayResolveRef.current = null;
-  }, []);
-
-  const clearDeferredStop = useCallback(() => {
-    if (deferredStopTimerRef.current !== null) {
-      window.clearTimeout(deferredStopTimerRef.current);
-      deferredStopTimerRef.current = null;
-    }
-  }, []);
-
-  const requestStop = useCallback((dispose = false) => {
-    stopRequestedRef.current = true;
-    runSeqRef.current += 1;
-    cancelSleep();
-    clearDeferredStop();
-    setRunning(false);
-
-    const client = clientRef.current;
-    if (!client) {
-      if (dispose) {
-        setReady(false);
-      }
+  const start = useCallback(async () => {
+    const previous = active.current;
+    if (previous) {
+      previous.gate.resume();
+      setStatus("running");
       return;
     }
 
-    if (dispose) {
-      clientRef.current = null;
-      setReady(false);
-    }
-
-    deferredStopTimerRef.current = window.setTimeout(() => {
-      deferredStopTimerRef.current = null;
-      if (!dispose && clientRef.current !== client) return;
-
-      client.stop();
-      if (dispose) {
-        client.dispose();
+    const run: Run = { controller: new AbortController(), gate: new FrameGate() };
+    active.current = run;
+    setStatus("running");
+    setError("");
+    let reference: BoxDimensions | null = null;
+    const output = (message: unknown) => {
+      const text = String(message);
+      if (active.current !== run) return;
+      if (text.startsWith("EDITOR_REFERENCE ")) {
+        reference = boxDimensionsFromLengths(text.trim().split(/\s+/).slice(1).map(Number));
       }
-    }, 0);
-  }, [cancelSleep, clearDeferredStop]);
-
-  const initLammps = useCallback(async () => {
-    if (clientRef.current) return clientRef.current;
-    const client = await LammpsClient.create({
-      print: onPrint,
-      printErr: onPrint,
-    });
-    clientRef.current = client;
-    setReady(true);
-    return client;
-  }, [onPrint]);
-
-  const fetchText = useCallback(async (resourcePath: string) => {
-    const base = import.meta.env.BASE_URL ?? "/";
-    const normalizedBase = base.endsWith("/") ? base : `${base}/`;
-    const cleanedPath = resourcePath.replace(/^\/+/, "");
-    const res = await fetch(`${normalizedBase}${cleanedPath}`);
-    if (!res.ok) {
-      throw new Error(`Failed to load ${resourcePath}: ${res.status} ${res.statusText}`);
-    }
-    return res.text();
-  }, []);
-
-  const prepareScript = useCallback(
-    async (spec: SimulationScriptSpec) => {
-      const client = await initLammps();
-      const scriptBody = await fetchText(spec.path);
-      if (spec.assets) {
-        for (const asset of spec.assets) {
-          const assetBody = await fetchText(asset.path);
-          const target =
-            asset.target ??
-            asset.path
-              .split("/")
-              .filter(Boolean)
-              .pop() ??
-            "asset.mod";
-          client.writeFile(target, assetBody);
-        }
-      }
-      return scriptBody.endsWith("\n") ? scriptBody : `${scriptBody}\n`;
-    },
-    [fetchText, initLammps]
-  );
-
-  useEffect(() => {
-    scriptRef.current = script;
-    prepareScript(script).catch((err) => {
-      console.error("Failed to preload LAMMPS script", err);
-    });
-  }, [script, prepareScript]);
-
-  const readPositions = useCallback(() => {
-    const client = clientRef.current;
-    if (!client) return { positions: new Float32Array(0), ids: new Int32Array(0), types: new Int32Array(0), count: 0 };
-    const particles = client.syncParticles({ copy: false });
-    if (!particles.count) {
-      return { positions: new Float32Array(0), ids: new Int32Array(0), types: new Int32Array(0), count: 0 };
-    }
-    return {
-      positions: (particles.positions as Float32Array) ?? new Float32Array(0),
-      ids: particles.ids ?? new Int32Array(0),
-      types: (particles.types as Int32Array) ?? new Int32Array(0),
-      count: particles.count,
+      onPrint(text);
     };
-  }, []);
-
-
-  const readBonds = useCallback(() => {
-    const client = clientRef.current;
-    if (!client) return { p1: new Float32Array(0), p2: new Float32Array(0), count: 0 };
-    const bonds = client.syncBonds({ copy: false });
-    if (!bonds.count) {
-      return { p1: new Float32Array(0), p2: new Float32Array(0), count: 0 };
-    }
-    return {
-      p1: (bonds.first as Float32Array) ?? new Float32Array(0),
-      p2: (bonds.second as Float32Array) ?? new Float32Array(0),
-      count: bonds.count,
-    };
-  }, []);
-
-  const readBox = useCallback(() => {
-    const client = clientRef.current;
-    if (!client) return { matrix: new Float32Array(0), origin: new Float32Array(0), lengths: new Float32Array(0) };
-    const box = client.syncBox({ copy: false });
-    return {
-      matrix: (box.matrix as Float32Array) ?? new Float32Array(0),
-      origin: (box.origin as Float32Array) ?? new Float32Array(0),
-      lengths: (box.lengths as Float32Array) ?? new Float32Array(0),
-    };
-  }, []);
-
-  const setOnStep = useCallback((onStep: ((frame: StepFrame) => void) | null) => {
-    onStepRef.current = onStep;
-    if (onStep && pendingFrameRef.current) {
-      onStep(pendingFrameRef.current);
-      pendingFrameRef.current = null;
-    }
-  }, []);
-
-
-  const setNetwork = useCallback(async () => {
-    const client = await initLammps();
-    client.writeFile("network.lmp", network);
-  }, [initLammps, network]);
-
-  useEffect(() => {
-    setNetwork().catch((err) => {
-      console.error("Failed to sync network with LAMMPS FS", err);
-    });
-  }, [setNetwork]);
-
-  useEffect(() => {
-    const shutdown = () => {
-      requestStop(true);
-    };
-
-    window.addEventListener("beforeunload", shutdown);
-    return () => {
-      window.removeEventListener("beforeunload", shutdown);
-      shutdown();
-    };
-  }, [requestStop]);
-
-  const start = useCallback(async () => {
-    requestStop();
-    const runSeq = runSeqRef.current + 1;
-    runSeqRef.current = runSeq;
-    stopRequestedRef.current = false;
-    cancelSleep();
-
     try {
-      const client = await initLammps();
-      const scriptText = await prepareScript(scriptRef.current);
-      await setNetwork();
-      setRunning(true);
-      client.start();
-      void client.runScriptAsync(
-        scriptText,
-        async (data) => {
-          if (runSeqRef.current !== runSeq || stopRequestedRef.current) return;
-
-          const frame: StepFrame = {
-            step: data.step,
-            positions: data.particles?.positions
-              ? Float32Array.from(data.particles.positions)
-              : new Float32Array(0),
-            p1: data.bonds?.first
-              ? Float32Array.from(data.bonds.first)
-              : new Float32Array(0),
-            p2: data.bonds?.second
-              ? Float32Array.from(data.bonds.second)
-              : new Float32Array(0),
-            bondCount: data.bonds?.count ?? 0,
-            matrix: data.box?.matrix
-              ? Float32Array.from(data.box.matrix)
-              : new Float32Array(0),
-            origin: data.box?.origin
-              ? Float32Array.from(data.box.origin)
-              : new Float32Array(0),
-            lengths: data.box?.lengths
-              ? Float32Array.from(data.box.lengths)
-              : new Float32Array(0),
-          };
-
-          if (onStepRef.current) {
-            onStepRef.current(frame);
-          } else {
-            pendingFrameRef.current = frame;
+      const moduleUrl = import.meta.env.BASE_URL + "lammps-runtime/client.js";
+      const { LammpsClient }: typeof import("lammps.js/client") = await import(/* @vite-ignore */ moduleUrl);
+      if (active.current !== run) return;
+      const client = await LammpsClient.create({ print: output, printErr: output }, {
+        worker: true,
+        onError: err => {
+          if (active.current === run) {
+            setError(err.message);
+            reset();
+            setStatus("idle");
           }
-
-          await sleep(0);
         },
-        { every: 10, fixId: "jsasync", copy: false }
-      ).catch((err) => {
-        if (runSeqRef.current === runSeq && !stopRequestedRef.current) {
-          console.error("Failed to start LAMMPS", err);
-        }
-      }).finally(() => {
-        if (runSeqRef.current === runSeq) {
-          setRunning(false);
-        }
       });
-    } catch (err) {
-      if (!stopRequestedRef.current) {
-        console.error("Failed to start LAMMPS", err);
+      if (active.current !== run) { client.dispose(); return; }
+      run.client = client;
+      const signal = run.controller.signal;
+      const body = await readAsset(script.path, signal);
+      for (const asset of script.assets ?? []) {
+        client.writeFile(asset.target ?? asset.path.split("/").pop()!, await readAsset(asset.path, signal));
       }
-      if (runSeqRef.current === runSeq) {
-        setRunning(false);
+      if (active.current !== run) return;
+      client.writeFile("network.lmp", network);
+      const thermal = script.id === "thermal-expand";
+      await client.runScriptAsync(body, async (data: WorkerStepData) => {
+        // The worker acknowledges this frame only when the callback returns.
+        await run.gate.wait();
+        if (!reference || active.current !== run || !data.particles || !data.box) return;
+        listener.current?.({
+          step: data.step, positions: data.particles.positions,
+          p1: data.bonds?.first ?? new Float32Array(), p2: data.bonds?.second ?? new Float32Array(),
+          bondCount: data.bonds?.count ?? 0, matrix: data.box.matrix, origin: data.box.origin,
+          lengths: data.box.lengths, reference, temperature: data.computeScalars?.thermo_temp ?? null,
+        });
+      }, { every: 10, computeScalars: thermal ? ["thermo_temp"] : [] });
+      if (!reference) throw new Error("The simulation did not report its reference cell.");
+    } catch (err) {
+      if (active.current === run) setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      if (active.current === run) {
+        reset();
+        setStatus("idle");
       }
     }
-  }, [cancelSleep, initLammps, prepareScript, requestStop, setNetwork, sleep]);
+  }, [network, script, onPrint, reset]);
 
-  const stop = useCallback(() => {
-    requestStop();
-  }, [requestStop]);
-
-  const reset = useCallback(() => {
-    pendingFrameRef.current = null;
-    requestStop(true);
-  }, [requestStop]);
-
-  return { ready, running, start, stop, reset, readPositions, readBonds, readBox, setNetwork, setOnStep };
+  return { status, start, stop, reset, error, setOnStep };
 }

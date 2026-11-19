@@ -1,13 +1,11 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
-import type { Atom, Bond } from "./model";
+import { useCallback, useEffect, useState } from "react";
+import type { Atom, Bond, Graph } from "./model";
 import { parseLmp } from "./parse";
 
-type Graph = { atoms: Atom[]; bonds: Bond[] };
 const STORAGE_KEY = "graph-state-v1";
 
 // Deep clone (structuredClone if present)
 function deepClone<T>(x: T): T {
-  // @ts-ignore
   if (typeof structuredClone === "function") return structuredClone(x);
   return JSON.parse(JSON.stringify(x));
 }
@@ -15,7 +13,7 @@ function nextAtomId(list: Atom[]) {
   let m = 0; for (const a of list) if (typeof a.id === "number" && a.id > m) m = a.id; return m + 1;
 }
 
-function loadFromStorage(): { atoms?: Atom[]; bonds?: Bond[]; selected?: number | null; zoomPercent?: number } | null {
+function loadFromStorage(): (Partial<Graph> & { selected?: number | null; zoomPercent?: number }) | null {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return null;
@@ -26,7 +24,7 @@ function loadFromStorage(): { atoms?: Atom[]; bonds?: Bond[]; selected?: number 
 export function useGraph(initial?: Graph) {
   const initialGraph: Graph = (() => {
     const saved = loadFromStorage();
-    if (saved?.atoms && saved?.bonds) return { atoms: saved.atoms, bonds: saved.bonds };
+    if (saved?.atoms && saved?.bonds) return { atoms: saved.atoms, bonds: saved.bonds, model: saved.model };
     if (initial) return deepClone(initial);
     return {
       atoms: [
@@ -95,8 +93,18 @@ export function useGraph(initial?: Graph) {
 
   const commit = useCallback((updater: (g: Graph) => Graph) => {
     setPresent(prev => {
-      const next = deepClone(updater(prev));
-      if (next.atoms === prev.atoms && next.bonds === prev.bonds) return prev;
+      const updated = updater(prev);
+      if (updated === prev) return prev;
+      const next = deepClone(updated);
+      // Drop angles affected by deleting an atom or one of its original links.
+      if (next.model && updated.model === prev.model) {
+        const ids = new Set(next.atoms.map(a => a.id));
+        const pair = (i: number, j: number) => [Math.min(i,j), Math.max(i,j)].join(":");
+        const links = new Set(next.bonds.map(b => pair(b.i, b.j)));
+        const removed = new Set(prev.bonds.map(b => pair(b.i, b.j)).filter(key => !links.has(key)));
+        next.model.angles = next.model.angles.filter(a => [a.i,a.j,a.k].every(id => ids.has(id)) &&
+          !removed.has(pair(a.i,a.j)) && !removed.has(pair(a.j,a.k)));
+      }
       setPast(p => [...p, deepClone(prev)]);
       setFuture([]);
       return next;
@@ -106,40 +114,43 @@ export function useGraph(initial?: Graph) {
   // ---- safe setters
   const setAtoms = useCallback((atoms: Atom[] | ((a: Atom[]) => Atom[])) => {
     commit(g => {
-      const nextArr = typeof atoms === "function" ? (atoms as any)(g.atoms) : atoms;
-      return { atoms: deepClone(Array.isArray(nextArr) ? nextArr : g.atoms), bonds: g.bonds };
+      const nextArr = typeof atoms === "function" ? atoms(g.atoms) : atoms;
+      return { ...g, atoms: deepClone(Array.isArray(nextArr) ? nextArr : g.atoms), bonds: g.bonds };
     });
   }, [commit]);
 
   const setBonds = useCallback((bonds: Bond[] | ((b: Bond[]) => Bond[])) => {
     commit(g => {
-      const nextArr = typeof bonds === "function" ? (bonds as any)(g.bonds) : bonds;
-      return { atoms: g.atoms, bonds: deepClone(Array.isArray(nextArr) ? nextArr : g.bonds) };
+      const nextArr = typeof bonds === "function" ? bonds(g.bonds) : bonds;
+      return { ...g, atoms: g.atoms, bonds: deepClone(Array.isArray(nextArr) ? nextArr : g.bonds) };
     });
   }, [commit]);
 
-  const addAtom = () => commit(g => ({ atoms: [...g.atoms, { id: nextAtomId(g.atoms), x: 0, y: 0 }], bonds: g.bonds }));
+  const addAtom = () => commit(g => ({ ...g, atoms: [...g.atoms, { id: nextAtomId(g.atoms), x: 0, y: 0 }], bonds: g.bonds }));
   const removeAtom = (id: number) => commit(g => ({
-    atoms: g.atoms.filter(a => a.id !== id),
+    ...g, atoms: g.atoms.filter(a => a.id !== id),
     bonds: g.bonds.filter(b => b.i !== id && b.j !== id),
   }));
   const addBond = () => commit(g => {
     if (g.atoms.length < 2) return g;
     const [i, j] = [g.atoms[0].id, g.atoms[1].id];
-    return { atoms: g.atoms, bonds: [...g.bonds, { id: nextBondId(g.bonds), i, j, k: 1 }] };
+    return { ...g, atoms: g.atoms, bonds: [...g.bonds, { id: nextBondId(g.bonds), i, j, k: 1 }] };
   });
 
-  const loadFromString = (lmpString: string) => commit(() => parseLmp(lmpString));
+  const loadFromString = (text: string) => {
+    const parsed = parseLmp(text);
+    commit(() => parsed);
+  };
 
-  const removeBond = (id: number) => commit(g => ({ atoms: g.atoms, bonds: g.bonds.filter(b => b.id !== id) }));
+  const removeBond = (id: number) => commit(g => ({ ...g, atoms: g.atoms, bonds: g.bonds.filter(b => b.id !== id) }));
   const clearAtoms = () => commit(() => ({ atoms: [], bonds: [] }));
-  const clearBonds = () => commit(g => ({ atoms: g.atoms, bonds: [] }));
+  const clearBonds = () => commit(g => ({ ...g, atoms: g.atoms, bonds: [] }));
 
   const removeByIds = useCallback((ids: number[]) => {
     if (!ids?.length) return;
     const target = new Set(ids);
     commit(g => ({
-      atoms: g.atoms.filter(a => !target.has(a.id)),
+      ...g, atoms: g.atoms.filter(a => !target.has(a.id)),
       bonds: g.bonds.filter(b => !target.has(b.i) && !target.has(b.j)),
     }));
   }, [commit]);
@@ -166,10 +177,21 @@ export function useGraph(initial?: Graph) {
   const canUndo = past.length > 0;
   const canRedo = future.length > 0;
 
+  const appendSelection = (atoms: Atom[], bonds: Bond[], angles: NonNullable<Graph["model"]>["angles"]) => {
+    commit(g => {
+      let model = g.model;
+      if (model && angles.length) {
+        const firstId = model.angles.reduce((max, a) => Math.max(max, a.id), 0) + 1;
+        model = { ...model, angles: [...model.angles, ...angles.map((a, i) => ({ ...a, id: firstId + i }))] };
+      }
+      return { atoms: [...g.atoms, ...atoms], bonds: [...g.bonds, ...bonds], model };
+    });
+  };
+
   function nextBondId(list: Bond[]) {
     let m = 0;
     for (const b of list) {
-      const bid = (b as any).id;
+      const bid = b.id;
       if (typeof bid === "number" && bid > m) m = bid;
     }
     return m + 1;
@@ -183,7 +205,7 @@ export function useGraph(initial?: Graph) {
       );
       if (already) return g;
       return {
-        atoms: g.atoms,
+        ...g, atoms: g.atoms,
         bonds: [...g.bonds, { id: nextBondId(g.bonds), i, j, k }],
       };
     });
@@ -197,36 +219,30 @@ export function useGraph(initial?: Graph) {
       else if (mod && (k === "y" || (k === "z" && e.shiftKey))) { redo(); e.preventDefault(); }
     };
     window.addEventListener("keydown", onKey, { capture: true });
-    return () => window.removeEventListener("keydown", onKey, { capture: true } as any);
+    return () => window.removeEventListener("keydown", onKey, { capture: true });
   }, [undo, redo]);
 
   useEffect(() => {
     try {
       localStorage.setItem(STORAGE_KEY, JSON.stringify({
-        atoms: present.atoms,
-        bonds: present.bonds,
+        ...present,
         selected,
         zoomPercent,
       }));
-    } catch { }
+    } catch { /* Storage may be disabled or full. */ }
   }, [present, selected, zoomPercent]);
 
   const atoms = present.atoms;
   const bonds = present.bonds;
   const scale = zoomPercent / 100;
 
-  return useMemo(() => ({
-    atoms, bonds, setAtoms, setBonds,
+  return {
+    model: present.model, atoms, bonds, setAtoms, setBonds,
     selected, setSelected,
     zoomPercent, setZoomPercent,
     scale,
 
     addAtom, removeAtom, addBond, removeBond, clearAtoms, clearBonds, removeByIds,
-    undo, redo, canUndo, canRedo, addBondBetween, loadFromString
-  }), [
-    atoms, bonds, setAtoms, setBonds,
-    selected, zoomPercent, scale,
-    addAtom, removeAtom, addBond, removeBond, clearAtoms, clearBonds, removeByIds,
-    undo, redo, canUndo, canRedo, addBondBetween, loadFromString
-  ]);
+    undo, redo, canUndo, canRedo, addBondBetween, loadFromString, appendSelection
+  };
 }

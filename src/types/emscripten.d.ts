@@ -1,4 +1,4 @@
 declare module "*.js" {
-  const createModule: (opts?: any) => Promise<any> | any;
+  const createModule: (opts?: Record<string, unknown>) => unknown;
   export default createModule;
 }

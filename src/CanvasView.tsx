@@ -1,7 +1,11 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
-import type { Atom, Bond } from "./model";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { Atom, Bond, ImportedModel } from "./model";
+
+type Fragment = { A: Atom[]; B: Bond[]; angles: ImportedModel["angles"] };
 
 type CanvasViewProps = {
+  model?: ImportedModel;
+  appendSelection: (atoms: Atom[], bonds: Bond[], angles: ImportedModel["angles"]) => void;
   atoms: Atom[];
   bonds: Bond[];
   scale: number;
@@ -22,6 +26,7 @@ export default function CanvasView({
   setAtoms,
   setBonds,
   removeByIds,
+  model, appendSelection,
   addBondBetween, 
 }: CanvasViewProps) {
   const wrapperRef = useRef<HTMLDivElement>(null);
@@ -48,14 +53,14 @@ export default function CanvasView({
 
   const selectionRef = useRef<Set<number>>(new Set(selected != null ? [selected] : []));
   const [tick, setTick] = useState(0);
-  function setSelection(next: Set<number>) {
+  const setSelection = useCallback((next: Set<number>) => {
     selectionRef.current = next;
     if (next.size === 1) setSelected([...next][0]); else setSelected(null);
     setTick(t => t + 1);
-  }
+  }, [setSelected]);
   useEffect(() => {
     if (selected != null && !selectionRef.current.has(selected)) setSelection(new Set([selected]));
-  }, [selected]);
+  }, [selected, setSelection]);
 
   const atomsRef = useRef(atoms); useEffect(() => { atomsRef.current = atoms; }, [atoms]);
   const bondsRef = useRef(bonds); useEffect(() => { bondsRef.current = bonds; }, [bonds]);
@@ -67,7 +72,7 @@ export default function CanvasView({
     if (s === "" || s === "-" || s === "." || s === "-.") return false;
     const n = Number(s); return Number.isFinite(n);
   };
-  function commitEditorIfOpen(save: boolean) {
+  const commitEditorIfOpen = useCallback((save: boolean) => {
     if (!editor) return;
     if (save && validateStr(editor.value)) {
       const val = Number(editor.value);
@@ -75,7 +80,7 @@ export default function CanvasView({
       setBonds(prev => prev.map(b => (b.id === id ? { ...b, k: val } : b)));
     }
     setEditor(null);
-  }
+  }, [editor, setBonds]);
 
   function getCanvasPoint(e: React.PointerEvent<HTMLCanvasElement> | React.MouseEvent<HTMLCanvasElement>) {
     const c = canvasRef.current!; const rect = c.getBoundingClientRect();
@@ -285,17 +290,20 @@ export default function CanvasView({
   };
 
   function nextAtomId(list: Atom[]) { let m = 0; for (const a of list) if (typeof a.id === "number" && a.id > m) m = a.id; return m + 1; }
-  function nextBondId(list: Bond[]) { let m = 0; for (const b of list) if (typeof b.id === "number" && (b as any).id > m) m = (b as any).id; return m + 1; }
+  function nextBondId(list: Bond[]) { let m = 0; for (const b of list) if (typeof b.id === "number" && b.id > m) m = b.id; return m + 1; }
+
+  const clipboard = useRef<Fragment | undefined>(undefined);
 
   function copySelection() {
     const sel = selectionRef.current; if (sel.size === 0) return null;
     const A = atomsRef.current.filter(a => sel.has(a.id)).map(a => ({ ...a }));
     const idSet = new Set(A.map(a => a.id));
     const B = bondsRef.current.filter(b => idSet.has(b.i) && idSet.has(b.j)).map(b => ({ ...b }));
-    return { A, B };
+    const angles = model?.angles.filter(a => [a.i, a.j, a.k].every(id => idSet.has(id))) ?? [];
+    return { A, B, angles };
   }
 
-  function pasteSelection(payload?: { A: Atom[]; B: Bond[] }) {
+  function pasteSelection(payload?: Fragment) {
     const data = payload ?? copySelection(); if (!data || data.A.length === 0) return;
     const srcAtoms = data.A, srcBonds = data.B;
 
@@ -313,8 +321,8 @@ export default function CanvasView({
     let nextBond = bondStart;
     const newBonds: Bond[] = srcBonds.map(b => ({ ...b, id: nextBond++, i: idMap.get(b.i)!, j: idMap.get(b.j)! }));
 
-    setAtoms(prev => [...prev, ...newAtoms]);
-    setBonds(prev => [...prev, ...newBonds]);
+    const angles = data.angles.map(a => ({ ...a, i: idMap.get(a.i)!, j: idMap.get(a.j)!, k: idMap.get(a.k)! }));
+    appendSelection(newAtoms, newBonds, angles);
     setSelection(new Set(newAtoms.map(a => a.id)));
   }
 
@@ -338,16 +346,16 @@ export default function CanvasView({
 
     if (mod && (key === "c" || key === "C")) {
       const payload = copySelection();
-      if (payload) { (window as any).__atomClipboard = payload; e.preventDefault(); e.stopPropagation(); }
+      if (payload) { clipboard.current = payload; e.preventDefault(); e.stopPropagation(); }
       return;
     }
 
     if (mod && (key === "v" || key === "V")) {
-      const payload = (window as any).__atomClipboard as { A: Atom[]; B: Bond[] } | undefined;
+      const payload = clipboard.current;
       if (!payload && selectionRef.current.size > 0) {
-        const p = copySelection(); if (p) (window as any).__atomClipboard = p;
+        const p = copySelection(); if (p) clipboard.current = p;
       }
-      pasteSelection((window as any).__atomClipboard);
+      pasteSelection(clipboard.current);
       e.preventDefault(); e.stopPropagation();
       return;
     }
@@ -371,8 +379,8 @@ export default function CanvasView({
       commitEditorIfOpen(true);
     };
     el.addEventListener("mousedown", handler, { capture: true });
-    return () => el.removeEventListener("mousedown", handler, { capture: true } as any);
-  }, [editor]);
+    return () => el.removeEventListener("mousedown", handler, { capture: true });
+  }, [editor, commitEditorIfOpen]);
 
   return (
     <div

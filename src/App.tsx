@@ -127,6 +127,7 @@ export default function App() {
   const {
     atoms,
     bonds,
+    model,
     setAtoms,
     setBonds,
     addAtom,
@@ -142,6 +143,7 @@ export default function App() {
     selected,
     addBondBetween,
     loadFromString,
+    appendSelection,
   } = useGraph();
 
   const [zoomPercent, setZoomPercent] = useState(200);
@@ -150,18 +152,28 @@ export default function App() {
     useState<typeof SIMULATION_SCRIPTS[number]["id"]>("auxetic-compress");
   const scale = zoomPercent / 100;
 
-  const lmp = useMemo(() => generateLmp(atoms, bonds), [atoms, bonds]);
+  const lmp = useMemo(() => generateLmp(atoms, bonds, model), [atoms, bonds, model]);
   const simulationScript =
     SIMULATION_SCRIPTS.find((s) => s.id === simulationScriptId) ?? SIMULATION_SCRIPTS[0];
 
+  const [loadedFile, setLoadedFile] = useState(0);
+  const [importError, setImportError] = useState("");
   const fileRef = useRef<HTMLInputElement>(null);
   const onPickFile = () => fileRef.current?.click();
   const onLoadFile: React.ChangeEventHandler<HTMLInputElement> = async (e) => {
     const f = e.target.files?.[0];
     if (!f) return;
-    const text = await f.text();
-    loadFromString(text);
-    e.target.value = "";
+    const input = e.currentTarget;
+    try {
+      loadFromString(await f.text());
+      setImportError("");
+      setSelected(null);
+      setLoadedFile(version => version + 1);
+    } catch (error) {
+      setImportError(error instanceof Error ? error.message : String(error));
+    } finally {
+      input.value = "";
+    }
   };
 
   return (
@@ -201,11 +213,11 @@ export default function App() {
         <BaseButton
           variant="success"
           onClick={() => setShowSim(true)}
-          disabled={!atoms.length}
+          disabled={!lmp}
           title={
-            atoms.length
+            lmp
               ? "Simulate current network"
-              : "Add atoms to enable simulation"
+              : "Add a bond with valid endpoints to enable simulation"
           }
         >
           Simulate
@@ -232,6 +244,7 @@ export default function App() {
           </select>
         </div>
 
+        {importError && <span role="alert">{importError}</span>}
         <div className="ml-auto flex items-center gap-2">
           <span className="text-sm">Zoom</span>
           <input
@@ -255,6 +268,9 @@ export default function App() {
           style={{ height: "calc(100vh - 72px)" }}
         >
           <CanvasView
+            key={loadedFile}
+            model={model}
+            appendSelection={appendSelection}
             addBondBetween={addBondBetween}
             atoms={atoms}
             bonds={bonds}
@@ -267,7 +283,7 @@ export default function App() {
           />
 
           <SimulationWrapper
-            isOpen={showSim}
+            isOpen={showSim && Boolean(lmp)}
             setIsOpen={setShowSim}
             lmp={lmp}
             script={simulationScript}
@@ -322,6 +338,6 @@ const SimulationWrapper = ({
       </BaseButton>
     </div>
     <div className="p-2 h-[calc(100%-40px)] overflow-auto">
-      <Simulation network={lmp} isOpen={isOpen} script={script} />
+      {isOpen && <Simulation key={script.id} network={lmp} isOpen={isOpen} script={script} />}
     </div>
   </div>
