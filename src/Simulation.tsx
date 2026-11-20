@@ -26,6 +26,7 @@ type Frame = {
 type Canvas2DState = {
   canvas: HTMLCanvasElement;
   ctx: CanvasRenderingContext2D;
+  bounds?: { minX: number; maxX: number; minY: number; maxY: number };
   dpr: number;
 };
 
@@ -206,6 +207,7 @@ export default function Simulation({
 
   const resetViewerState = useCallback(() => {
     setPlateaus([]);
+    if (canvas2d.current) canvas2d.current.bounds = undefined;
     frames.current = [];
     frameIdx.current = 0;
     setFrameCount(0);
@@ -267,6 +269,7 @@ export default function Simulation({
         new THREE.MeshStandardMaterial({ color: ATOM, metalness: 0.05, roughness: 0.6 }),
         20000
       );
+      atoms.count = 0;
       const bonds = new THREE.LineSegments(
         new THREE.BufferGeometry(),
         new THREE.LineBasicMaterial({ color: BOND, linewidth: 1 })
@@ -408,6 +411,7 @@ export default function Simulation({
     }
     atoms.count = n;
     atoms.instanceMatrix.needsUpdate = true;
+    atoms.computeBoundingSphere();
   };
 
   const fitCameraToPositions = (pos: Float32Array) => {
@@ -483,9 +487,14 @@ export default function Simulation({
       }
     };
 
-    scan(pos);
-    if (boxOutline.length) scan(boxOutline);
-    if (!Number.isFinite(minX) || !Number.isFinite(maxX) || !Number.isFinite(minY) || !Number.isFinite(maxY)) return;
+    if (fallback.bounds) {
+      ({ minX, maxX, minY, maxY } = fallback.bounds);
+    } else {
+      scan(pos);
+      scan(boxOutline);
+      if (!Number.isFinite(minX) || !Number.isFinite(minY)) return;
+      fallback.bounds = { minX, maxX, minY, maxY };
+    }
 
     const pad = 20;
     const rangeX = Math.max(1e-6, maxX - minX);
@@ -671,6 +680,7 @@ export default function Simulation({
 
   const onScrubEnd = () => {
     scrubbing.current = false;
+    followLive.current = true;
   };
 
   const drawFrameIdx = useCallback((idx: number) => {
@@ -737,10 +747,12 @@ export default function Simulation({
           max={0}
           defaultValue={0}
           onChange={(e) => drawFrameIdx(+e.target.value)}
-          onMouseDown={onScrubStart}
-          onMouseUp={onScrubEnd}
-          onTouchStart={onScrubStart}
-          onTouchEnd={onScrubEnd}
+          aria-label="Simulation frame"
+          onPointerDown={e => {
+            e.currentTarget.setPointerCapture(e.pointerId);
+            onScrubStart();
+          }}
+          onLostPointerCapture={onScrubEnd}
           className="flex-1 accent-slate-900 cursor-pointer"
         />
         <span ref={frameLabelRef} className="text-xs w-16 text-right tabular-nums">—</span>

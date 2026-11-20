@@ -99,17 +99,22 @@ export function useLammps(onPrint: (...args: unknown[]) => void, network: string
       if (active.current !== run) return;
       client.writeFile("network.lmp", network);
       const thermal = script.id !== "auxetic-compress";
+      let nextFrameAt = 0;
       await client.runScriptAsync(body, async (data: WorkerStepData) => {
         // The worker acknowledges this frame only when the callback returns.
+        // Pace visible snapshots independently of the numerical timestep.
+        const delay = nextFrameAt - performance.now();
+        if (delay > 0) await new Promise(resolve => setTimeout(resolve, delay));
         await run.gate.wait();
         if (!reference || active.current !== run || !data.particles || !data.box) return;
+        nextFrameAt = performance.now() + 1000 / 30;
         listener.current?.({
           step: data.step, positions: data.particles.positions,
           p1: data.bonds?.first ?? new Float32Array(), p2: data.bonds?.second ?? new Float32Array(),
           bondCount: data.bonds?.count ?? 0, matrix: data.box.matrix, origin: data.box.origin,
           lengths: data.box.lengths, reference, temperature: data.computeScalars?.thermo_temp ?? null,
         });
-      }, { every: script.id === "nte" ? 500 : 10, computeScalars: thermal ? ["thermo_temp"] : [] });
+      }, { every: 500, computeScalars: thermal ? ["thermo_temp"] : [] });
       if (!reference) throw new Error("The simulation did not report its reference cell.");
     } catch (err) {
       if (active.current === run) setError(err instanceof Error ? err.message : String(err));
