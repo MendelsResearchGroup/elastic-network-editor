@@ -43,7 +43,21 @@ export default function CanvasView({
   } | null>(null);
 
   const byId = useMemo(() => new Map(atoms.map(a => [a.id, a])), [atoms]);
-  const WORLD = 50;
+  // Frame the loaded network once so dragging an atom does not move the camera.
+  const [view] = useState(() => {
+    let left = Infinity, right = -Infinity, top = Infinity, bottom = -Infinity;
+    for (const atom of atoms) {
+      left = Math.min(left, atom.x); right = Math.max(right, atom.x);
+      top = Math.min(top, atom.y); bottom = Math.max(bottom, atom.y);
+    }
+    return {
+      x: atoms.length ? (left + right) / 2 : 0, y: atoms.length ? (top + bottom) / 2 : 0,
+      width: Math.max(1, right - left), height: Math.max(1, bottom - top), initialScale: scale,
+    };
+  });
+  const [canvasSize, setCanvasSize] = useState({ width: 800, height: 400 });
+  const WORLD = Math.max(1, Math.min(50, (canvasSize.width - 52) / (view.width * view.initialScale),
+    (canvasSize.height - 52) / (view.height * view.initialScale)));
   const MOVE_EPS = 3 / (scale * WORLD);
 
   const [showLabels, setShowLabels] = useState(false);
@@ -55,7 +69,7 @@ export default function CanvasView({
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
-    const observer = new ResizeObserver(() => setTick(value => value + 1));
+    const observer = new ResizeObserver(([entry]) => setCanvasSize({ width: entry.contentRect.width, height: entry.contentRect.height }));
     observer.observe(canvas);
     return () => observer.disconnect();
   }, []);
@@ -96,11 +110,11 @@ export default function CanvasView({
     const dpr = window.devicePixelRatio || 1;
     const xDev = (e.clientX - rect.left) * dpr; const yDev = (e.clientY - rect.top) * dpr;
     const a = dpr * scale * WORLD;
-    return { x: (xDev - c.width / 2) / a, y: (yDev - c.height / 2) / a };
+    return { x: (xDev - c.width / 2) / a + view.x, y: (yDev - c.height / 2) / a + view.y };
   }
   function worldToCanvasCss(x: number, y: number) {
     const c = canvasRef.current!; const dpr = window.devicePixelRatio || 1;
-    const a = dpr * scale * WORLD; const xDev = x * a + c.width / 2; const yDev = y * a + c.height / 2;
+    const a = dpr * scale * WORLD; const xDev = (x - view.x) * a + c.width / 2; const yDev = (y - view.y) * a + c.height / 2;
     return { cx: xDev / dpr, cy: yDev / dpr };
   }
   function hitTestAtom(x: number, y: number) {
@@ -125,6 +139,7 @@ export default function CanvasView({
     ctx.clearRect(0, 0, c.width, c.height);
     ctx.setTransform(dpr * scale * WORLD, 0, 0, dpr * scale * WORLD, c.width / 2, c.height / 2);
 
+    ctx.translate(-view.x, -view.y);
     const px = (n: number) => n / (scale * WORLD);
 
     if (gridShow) {
@@ -137,25 +152,25 @@ export default function CanvasView({
       ctx.lineWidth = px(1);
       ctx.globalAlpha = 0.85;
 
-      const xStart = Math.ceil((-halfW) / gs) * gs;
-      const xEnd = Math.floor((halfW) / gs) * gs;
+      const xStart = Math.ceil((view.x - halfW) / gs) * gs;
+      const xEnd = Math.floor((view.x + halfW) / gs) * gs;
       for (let x = xStart; x <= xEnd; x = +(x + gs).toFixed(12)) {
         const major = Math.round(x / gs) % majorEvery === 0;
         ctx.beginPath();
-        ctx.moveTo(x, -halfH);
-        ctx.lineTo(x, halfH);
+        ctx.moveTo(x, view.y - halfH);
+        ctx.lineTo(x, view.y + halfH);
         ctx.strokeStyle = major ? "#94a3b8" : "#e2e8f0";
         ctx.globalAlpha = major ? 0.9 : 0.7;
         ctx.stroke();
       }
 
-      const yStart = Math.ceil((-halfH) / gs) * gs;
-      const yEnd = Math.floor((halfH) / gs) * gs;
+      const yStart = Math.ceil((view.y - halfH) / gs) * gs;
+      const yEnd = Math.floor((view.y + halfH) / gs) * gs;
       for (let y = yStart; y <= yEnd; y = +(y + gs).toFixed(12)) {
         const major = Math.round(y / gs) % majorEvery === 0;
         ctx.beginPath();
-        ctx.moveTo(-halfW, y);
-        ctx.lineTo(halfW, y);
+        ctx.moveTo(view.x - halfW, y);
+        ctx.lineTo(view.x + halfW, y);
         ctx.strokeStyle = major ? "#94a3b8" : "#e2e8f0";
         ctx.globalAlpha = major ? 0.9 : 0.7;
         ctx.stroke();
@@ -204,7 +219,7 @@ export default function CanvasView({
       ctx.lineWidth = sel ? px2(3) : px2(2); ctx.strokeStyle = sel ? "#1e3a8a" : "#0c4a6e"; ctx.stroke();
       ctx.fillStyle = "#111827"; ctx.font = `${px2(12)}px ui-sans-serif`; if (showLabels || sel) ctx.fillText(`${a.id}`, a.x + px2(10), a.y - px2(10));
     });
-  }, [atoms, bonds, scale, byId, tick, gridShow, gridSize, showLabels]);
+  }, [atoms, bonds, scale, byId, tick, gridShow, gridSize, showLabels, WORLD, canvasSize, view]);
 
   function roundedRect(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, r: number) {
     const rr = Math.min(r, Math.abs(w)/2, Math.abs(h)/2);
