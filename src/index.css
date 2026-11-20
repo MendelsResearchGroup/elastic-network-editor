@@ -1,1 +1,37 @@
 @import "tailwindcss";
+
+:root { font-family: "Inter", "Segoe UI", sans-serif; color: #162d30; background: #f2f5f3; accent-color: #086e66; }
+.studio { width: min(1440px, 100%); margin: auto; padding: 0 clamp(12px, 3.2vw, 52px) 28px; }
+.masthead, .toolstrip, .run-tools, .canvas-footer { display: flex; align-items: center; gap: .55rem; }
+.masthead { justify-content: space-between; padding: 22px 0; }
+.masthead h1 { display: flex; align-items: center; gap: 11px; font-size: clamp(18px, 2vw, 25px); font-weight: 650; letter-spacing: -.045em; }
+.network-mark { background: #115c55; color: white; border-radius: 9px; padding: 0 9px 3px; font-size: 27px; line-height: 1.25; }
+summary { cursor: pointer; }
+.example-menu { position: relative; z-index: 5; }
+.example-menu summary, .toolstrip select { font-size: 14px; border: 1px solid #d0dad5; background: white; padding: 7px 12px; border-radius: 9px; }
+.example-menu nav { position: absolute; right: 0; margin-top: 6px; background: white; box-shadow: 0 6px 24px #173b3226; padding: 5px; border-radius: 10px; width: max-content; }
+.example-menu a { display: block; padding: 9px 14px; border-radius: 6px; }
+.example-menu a:hover { background: #eaf3ef; }
+.workbench { border: 1px solid #cfdad4; background: white; border-radius: 16px; box-shadow: 0 5px 22px #213d3410; overflow: hidden; }
+.toolstrip { padding: 12px 16px; border-bottom: 1px solid #d9e2dd; flex-wrap: wrap; }
+.run-tools { margin-left: auto; }
+.stage > div { border: 0; border-radius: 0; box-shadow: none; }
+.stage canvas { display: block; width: 100%; height: clamp(300px, 60vh, 680px); background: #f9fbfa; }
+.canvas-footer { padding: 8px 16px; justify-content: space-between; border-top: 1px solid #e2e8e4; color: #47615a; font-size: 13px; }
+.canvas-footer label { display: inline-flex; align-items: center; gap: 8px; }
+.network-details { margin-top: 14px; }
+.network-details > summary, .analysis-details > summary { color: #365a50; padding: 9px 0; font-size: 14px; font-weight: 600; }
+.data-panels { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(280px,100%),1fr)); gap: 12px; }
+.data-panels > div { background: white; border-color: #d0dad5; }
+.simulation-pane { padding: 12px 16px; }
+.simulation-canvas { width: min(100%, 59vh, 640px); aspect-ratio: 1; margin: 0 auto; }
+.simulation-canvas canvas { display: block; width: 100% !important; height: 100% !important; }
+.measurement-line { text-align: center; padding: 8px; font-size: 16px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.analysis-details { border-top: 1px solid #d9e2dd; }
+.studio :focus-visible { outline: 2px solid #00887e; outline-offset: 2px; }
+@media (max-width: 680px) {
+  .masthead { padding: 14px 0; }
+  .toolstrip { padding: 9px; }
+  .run-tools { margin-left: 0; flex-wrap: wrap; }
+  .stage canvas { height: 50vh; }
+}

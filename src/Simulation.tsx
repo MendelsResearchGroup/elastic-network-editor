@@ -720,7 +720,7 @@ export default function Simulation({
         });
 
   return (
-    <div className="border rounded p-3 flex flex-col gap-3 bg-white">
+    <div className="simulation-pane">
       <div className="flex items-center gap-3">
         <BaseButton
           variant="primary"
@@ -759,8 +759,15 @@ export default function Simulation({
       </div>
 
       {error && <p role="alert">{error}</p>}
-      <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_320px] gap-3 min-h-0">
-        <div ref={host} className="w-full aspect-square" />
+      <div className="simulation-body">
+        <div ref={host} className="simulation-canvas" />
+        <div className="measurement-line">
+          {compression ? `Poisson ratio  ${formatMeasurement(selectedMeasurement?.poissonRatio ?? null)}`
+            : script.id === "nte" && plateaus.length === 2
+              ? `Mean area change  ${((plateaus[1].area / plateaus[0].area - 1) * 100).toFixed(3)}%`
+              : `Cell area  ${formatMeasurement(selectedBox ? selectedBox.width * selectedBox.height : null)} LJ²`}
+        </div>
+        <details className="analysis-details"><summary>Measurements</summary>
 
         <div className="flex flex-col gap-3 min-w-0">
           <section className="border border-slate-200 p-3">
@@ -834,6 +841,7 @@ export default function Simulation({
             />
           </section>}
         </div>
+        </details>
       </div>
     </div>
   );

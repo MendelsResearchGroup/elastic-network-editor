@@ -187,99 +187,35 @@ export default function App() {
   };
 
   return (
-    <div className="w-full h-full grid grid-rows-[auto_1fr] bg-white text-slate-900">
-      <div className="flex flex-wrap items-center gap-2 p-3 border-b sticky top-0 bg-white z-10">
-        <nav aria-label="Network examples" className="flex gap-3 text-sm">
-          {examples.map(item => <a key={item.id} className="underline" href={`?example=${item.id}`} target="_blank" rel="noreferrer">{item.name}</a>)}
-        </nav>
-        <div className="flex gap-2">
-          <BaseButton variant="ghost" disabled={!canUndo} onClick={undo}>
-            Undo
-          </BaseButton>
-          <BaseButton variant="ghost" disabled={!canRedo} onClick={redo}>
-            Redo
-          </BaseButton>
+    <main className="studio">
+      <header className="masthead">
+        <h1><span className="network-mark" aria-hidden="true">◇</span> Elastic Network Editor</h1>
+        <details className="example-menu">
+          <summary>Examples</summary>
+          <nav aria-label="Network examples">{examples.map(item =>
+            <a key={item.id} href={`?example=${item.id}`} target="_blank" rel="noreferrer">{item.name}</a>
+          )}</nav>
+        </details>
+      </header>
+      <section className="workbench">
+        <div className="toolstrip">
+          {showSim ? <BaseButton variant="ghost" onClick={() => setShowSim(false)}>← Edit network</BaseButton> : <>
+            <BaseButton variant="primary" onClick={addAtom}>+ Atom</BaseButton>
+            <BaseButton variant="primary" onClick={addBond}>+ Bond</BaseButton>
+            <BaseButton variant="ghost" disabled={!canUndo} onClick={undo}>Undo</BaseButton>
+            <BaseButton variant="ghost" disabled={!canRedo} onClick={redo}>Redo</BaseButton>
+            <BaseButton variant="ghost" onClick={onPickFile}>Load .lmp</BaseButton>
+            <input ref={fileRef} type="file" accept=".lmp,.data,.txt" hidden onChange={onLoadFile} />
+          </>}
+          <div className="run-tools">
+            <select aria-label="Simulation script" value={simulationScriptId} onChange={e => setSimulationScriptId(e.target.value as typeof simulationScriptId)}>
+              {SIMULATION_SCRIPTS.map(s => <option key={s.id} value={s.id}>{s.label}</option>)}
+            </select>
+            {!showSim && <BaseButton variant="success" disabled={!lmp} onClick={() => setShowSim(true)}>▶ Simulate</BaseButton>}
+          </div>
         </div>
-
-        <div className="h-5 w-px bg-slate-200 mx-2" />
-
-        <div className="flex gap-2">
-          <BaseButton variant="primary" onClick={addAtom}>
-            Add Atom
-          </BaseButton>
-          <BaseButton variant="primary" onClick={addBond}>
-            Add Bond
-          </BaseButton>
-          <BaseButton variant="ghost" onClick={onPickFile}>
-            Load .lmp
-          </BaseButton>
-          <input
-            ref={fileRef}
-            type="file"
-            accept=".lmp,.data,.txt"
-            className="hidden"
-            onChange={onLoadFile}
-          />
-        </div>
-
-        <div className="h-5 w-px bg-slate-200 mx-2" />
-        <BaseButton
-          variant="success"
-          onClick={() => setShowSim(true)}
-          disabled={!lmp}
-          title={
-            lmp
-              ? "Simulate current network"
-              : "Add a bond with valid endpoints to enable simulation"
-          }
-        >
-          Simulate
-        </BaseButton>
-
-        <div className="flex items-center gap-2">
-          <label className="text-sm text-slate-600" htmlFor="simulation-script">
-            Script
-          </label>
-          <select
-            id="simulation-script"
-            className="border border-slate-300 rounded-md px-2 py-1 text-sm bg-white"
-            value={simulationScriptId}
-            onChange={(e) =>
-              setSimulationScriptId(e.target.value as typeof simulationScriptId)
-            }
-            title="Choose which simulation input script to run"
-          >
-            {SIMULATION_SCRIPTS.map((s) => (
-              <option key={s.id} value={s.id}>
-                {s.label}
-              </option>
-            ))}
-          </select>
-        </div>
-
-        {importError && <span role="alert">{importError}</span>}
-        <div className="ml-auto flex items-center gap-2">
-          <span className="text-sm">Zoom</span>
-          <input
-            className="accent-slate-900 cursor-pointer"
-            type="range"
-            min={50}
-            max={250}
-            step={1}
-            value={zoomPercent}
-            onChange={(e) => setZoomPercent(parseInt(e.target.value))}
-          />
-          <span className="tabular-nums text-xs w-12 text-right">
-            {zoomPercent}%
-          </span>
-        </div>
-      </div>
-
-      <div className="grid grid-cols-1 xl:grid-cols-[1fr_420px] gap-4 p-4">
-        <div
-          className="rounded-2xl border p-2 relative overflow-hidden"
-          style={{ height: "calc(100vh - 72px)" }}
-        >
+        {importError && <p role="alert">{importError}</p>}
+        {!showSim && <div className="stage">
           <CanvasView
             key={loadedFile}
             model={model}
@@ -294,63 +230,21 @@ export default function App() {
             setBonds={setBonds}
             removeByIds={removeByIds}
           />
-
-          <SimulationWrapper
-            isOpen={showSim && Boolean(lmp)}
-            setIsOpen={setShowSim}
-            lmp={lmp}
-            script={simulationScript}
-          />
-        </div>
-
-        <div
-          className="flex flex-col gap-3 overflow-auto"
-          style={{ maxHeight: "calc(100vh - 72px)" }}
-        >
+        </div>}
+        {showSim && lmp && <Simulation key={simulationScript.id} network={lmp} script={simulationScript} isOpen />}
+        {!showSim && <footer className="canvas-footer">
+          <span>{atoms.length} atoms · {bonds.length} bonds</span>
+          <label>Zoom <input type="range" min={50} max={250} value={zoomPercent} onChange={e => setZoomPercent(Number(e.target.value))} /> {zoomPercent}%</label>
+        </footer>}
+      </section>
+      <details className="network-details">
+        <summary>Network data</summary>
+        <div className="data-panels">
           <LammpsPreview text={lmp} />
           <AtomTable rows={atoms} onChange={setAtoms} onRemove={removeAtom} />
           <BondTable rows={bonds} onChange={setBonds} onRemove={removeBond} />
         </div>
-      </div>
-    </div>
+      </details>
+    </main>
   );
 }
-
-type SimulationScript = (typeof SIMULATION_SCRIPTS)[number];
-
-const SimulationWrapper = ({
-  isOpen,
-  setIsOpen,
-  lmp,
-  script,
-}: {
-  isOpen: boolean;
-  setIsOpen: (isOpen: boolean) => void;
-  lmp: string;
-  script: SimulationScript;
-}) =>
-  <div className="absolute inset-0 z-20 bg-white/95 border-l border-t" style={{
-    visibility: isOpen ? "visible" : "hidden",
-    opacity: isOpen ? 1 : 0,
-    pointerEvents: isOpen ? "auto" : "none",
-  }}>
-    <div className="flex items-center justify-between gap-2 p-2 border-b bg-white">
-      <div>
-        <div>
-          <div className="font-medium text-sm">Simulation · {script.label}</div>
-          <div className="text-xs text-slate-500">
-            (live view of current network)
-          </div>
-        </div>
-      </div>
-      <BaseButton
-        variant="ghost"
-        onClick={() => setIsOpen(false)}
-      >
-        X
-      </BaseButton>
-    </div>
-    <div className="p-2 h-[calc(100%-40px)] overflow-auto">
-      {isOpen && <Simulation key={script.id} network={lmp} isOpen={isOpen} script={script} />}
-    </div>
-  </div>

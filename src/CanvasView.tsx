@@ -46,10 +46,19 @@ export default function CanvasView({
   const WORLD = 50;
   const MOVE_EPS = 3 / (scale * WORLD);
 
+  const [showLabels, setShowLabels] = useState(false);
   const [gridSnap, setGridSnap] = useState(true);
   const [gridShow, setGridShow] = useState(true);
   const [gridSize, setGridSize] = useState(0.5);
   const snap = (v: number) => gridSnap ? Math.round(v / gridSize) * gridSize : v;
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const observer = new ResizeObserver(() => setTick(value => value + 1));
+    observer.observe(canvas);
+    return () => observer.disconnect();
+  }, []);
 
   const selectionRef = useRef<Set<number>>(new Set(selected != null ? [selected] : []));
   const [tick, setTick] = useState(0);
@@ -167,6 +176,7 @@ export default function CanvasView({
       ctx.stroke();
 
       const mx = (ai.x + aj.x) / 2, my = (ai.y + aj.y) / 2;
+      if (!showLabels && !bothSel) return;
       const label = `k=${b.k}`;
       ctx.font = `${px2(12)}px ui-sans-serif`;
       const metrics = ctx.measureText(label);
@@ -192,9 +202,9 @@ export default function CanvasView({
       ctx.beginPath(); ctx.arc(a.x, a.y, r, 0, Math.PI * 2);
       ctx.fillStyle = sel ? "#2563eb" : "#0ea5e9"; ctx.fill();
       ctx.lineWidth = sel ? px2(3) : px2(2); ctx.strokeStyle = sel ? "#1e3a8a" : "#0c4a6e"; ctx.stroke();
-      ctx.fillStyle = "#111827"; ctx.font = `${px2(12)}px ui-sans-serif`; ctx.fillText(`${a.id}`, a.x + px2(10), a.y - px2(10));
+      ctx.fillStyle = "#111827"; ctx.font = `${px2(12)}px ui-sans-serif`; if (showLabels || sel) ctx.fillText(`${a.id}`, a.x + px2(10), a.y - px2(10));
     });
-  }, [atoms, bonds, scale, byId, tick, gridShow, gridSize]);
+  }, [atoms, bonds, scale, byId, tick, gridShow, gridSize, showLabels]);
 
   function roundedRect(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, r: number) {
     const rr = Math.min(r, Math.abs(w)/2, Math.abs(h)/2);
@@ -450,9 +460,10 @@ export default function CanvasView({
             <option value="0.01">0.01</option>
           </select>
         </div>
-        <div className="ml-auto">
+        <label><input type="checkbox" checked={showLabels} onChange={e => setShowLabels(e.target.checked)} /> Labels</label>
+        <details className="ml-auto"><summary>Shortcuts</summary><p>
           Click to select (Shift+click adds/removes). Drag any selected atom to move the group. Delete/Backspace removes. Ctrl/⌘+C / Ctrl/⌘+V duplicates. Double-click a <code>k=</code> to edit.
-        </div>
+        </p></details>
       </div>
     </div>
   );
