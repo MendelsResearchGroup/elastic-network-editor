@@ -15,7 +15,8 @@ const examples = [
   { id: "negative-thermal-expansion", name: "Negative thermal expansion", input: thermalLattice, script: "nte" },
 ] as const;
 const example = examples.find(item => item.id === new URLSearchParams(location.search).get("example"));
-const exampleGraph = example && parseLmp(example.input);
+const starter = parseLmp(rotatingSquares);
+const exampleGraph = example?.id === "rotating-squares" ? starter : example && parseLmp(example.input);
 
 const SIMULATION_SCRIPTS = [
   { id: "nte", label: "Cold and hot plateaus", path: "/nte.deformation" },
@@ -154,7 +155,7 @@ export default function App() {
     addBondBetween,
     loadFromString,
     appendSelection,
-  } = useGraph(exampleGraph);
+  } = useGraph(starter, exampleGraph);
 
   const [zoomPercent, setZoomPercent] = useState(example ? 100 : 200);
   const [showSim, setShowSim] = useState(Boolean(example));

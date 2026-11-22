@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Atom, Bond, ImportedModel } from "./model";
+import { orthogonalCell, periodicBondSegments } from "./periodicBonds";
 
 type Fragment = { A: Atom[]; B: Bond[]; angles: ImportedModel["angles"] };
 
@@ -43,9 +44,10 @@ export default function CanvasView({
   } | null>(null);
 
   const byId = useMemo(() => new Map(atoms.map(a => [a.id, a])), [atoms]);
+  const cell = useMemo(() => orthogonalCell(model), [model]);
   // Frame the loaded network once so dragging an atom does not move the camera.
   const [view] = useState(() => {
-    let left = Infinity, right = -Infinity, top = Infinity, bottom = -Infinity;
+    let { left, right, top, bottom } = cell ?? { left: Infinity, right: -Infinity, top: Infinity, bottom: -Infinity };
     for (const atom of atoms) {
       left = Math.min(left, atom.x); right = Math.max(right, atom.x);
       top = Math.min(top, atom.y); bottom = Math.max(bottom, atom.y);
@@ -180,18 +182,36 @@ export default function CanvasView({
 
     const px2 = (n: number) => n / (scale * WORLD);
 
+    if (cell) {
+      ctx.save();
+      ctx.strokeStyle = "#94a3b8";
+      ctx.lineWidth = px2(1);
+      ctx.setLineDash([px2(3), px2(4)]);
+      ctx.strokeRect(cell.left, cell.top, cell.right - cell.left, cell.bottom - cell.top);
+      ctx.restore();
+    }
+
     ctx.lineWidth = px2(2);
     ctx.globalAlpha = 0.95;
     bonds.forEach(b => {
       const ai = byId.get(b.i), aj = byId.get(b.j); if (!ai || !aj) return;
       const bothSel = selectionRef.current.has(b.i) && selectionRef.current.has(b.j);
-      ctx.beginPath(); ctx.moveTo(ai.x, ai.y); ctx.lineTo(aj.x, aj.y);
+      const segments = periodicBondSegments(ai, aj, cell);
+      ctx.beginPath();
+      for (const [start, end] of segments) {
+        ctx.moveTo(start.x, start.y);
+        ctx.lineTo(end.x, end.y);
+      }
       ctx.strokeStyle = bothSel ? "#1e40af" : "#334155";
       ctx.lineWidth = bothSel ? px2(3) : px2(2);
       ctx.stroke();
 
-      const mx = (ai.x + aj.x) / 2, my = (ai.y + aj.y) / 2;
       if (!showLabels && !bothSel) return;
+      const [start, end] = segments.reduce((longest, segment) => {
+        const length = ([a, b]: typeof segment) => Math.hypot(a.x - b.x, a.y - b.y);
+        return length(segment) > length(longest) ? segment : longest;
+      });
+      const mx = (start.x + end.x) / 2, my = (start.y + end.y) / 2;
       const label = `k=${b.k}`;
       ctx.font = `${px2(12)}px ui-sans-serif`;
       const metrics = ctx.measureText(label);
@@ -219,7 +239,7 @@ export default function CanvasView({
       ctx.lineWidth = sel ? px2(3) : px2(2); ctx.strokeStyle = sel ? "#1e3a8a" : "#0c4a6e"; ctx.stroke();
       ctx.fillStyle = "#111827"; ctx.font = `${px2(12)}px ui-sans-serif`; if (showLabels || sel) ctx.fillText(`${a.id}`, a.x + px2(10), a.y - px2(10));
     });
-  }, [atoms, bonds, scale, byId, tick, gridShow, gridSize, showLabels, WORLD, canvasSize, view]);
+  }, [atoms, bonds, scale, byId, tick, gridShow, gridSize, showLabels, WORLD, canvasSize, view, cell]);
 
   function roundedRect(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, r: number) {
     const rr = Math.min(r, Math.abs(w)/2, Math.abs(h)/2);
@@ -304,9 +324,11 @@ export default function CanvasView({
     let best: { id: number; mx: number; my: number; dist: number; k: number } | null = null;
     for (const b of bondsRef.current) {
       const ai = byId.get(b.i), aj = byId.get(b.j); if (!ai || !aj) continue;
-      const mx = (ai.x + aj.x) / 2, my = (ai.y + aj.y) / 2;
-      const d = Math.hypot(mx - p.x, my - p.y);
-      if (!best || d < best.dist) best = { id: b.id, mx, my, dist: d, k: b.k };
+      for (const [a, z] of periodicBondSegments(ai, aj, cell)) {
+        const mx = (a.x + z.x) / 2, my = (a.y + z.y) / 2;
+        const d = Math.hypot(mx - p.x, my - p.y);
+        if (!best || d < best.dist) best = { id: b.id, mx, my, dist: d, k: b.k };
+      }
     }
     if (!best) return;
     const hitRadius = 18 / (scale * WORLD); if (best.dist > hitRadius) return;

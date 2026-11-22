@@ -114,7 +114,7 @@ export function useLammps(onPrint: (...args: unknown[]) => void, network: string
           bondCount: data.bonds?.count ?? 0, matrix: data.box.matrix, origin: data.box.origin,
           lengths: data.box.lengths, reference, temperature: data.computeScalars?.thermo_temp ?? null,
         });
-      }, { every: 500, computeScalars: thermal ? ["thermo_temp"] : [] });
+      }, { every: thermal ? 500 : 1500, computeScalars: thermal ? ["thermo_temp"] : [] });
       if (!reference) throw new Error("The simulation did not report its reference cell.");
     } catch (err) {
       if (active.current === run) setError(err instanceof Error ? err.message : String(err));
